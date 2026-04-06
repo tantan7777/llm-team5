@@ -10,7 +10,8 @@ This phase builds the knowledge base for CrossBorder Copilot. It processes DHL s
 
 ```
 project/
-├── pdf_docs/            # DHL PDF documents (56 files)
+├── pdf_docs/            # DHL PDF documents (66 files)
+├── html_pages/          # DHL HTML articles (30 files)
 ├── chroma_db/           # ChromaDB vector store (auto-generated, do not edit)
 ├── raw_documents.json   # Parsed documents before chunking (auto-generated)
 ├── parse_local.py       # Step 1 — parse PDF files into raw_documents.json
@@ -47,13 +48,13 @@ Reads all PDFs in `pdf_docs/`, extracts clean text, and saves to `raw_documents.
 
 Output example:
 ```
-Total documents parsed : 66
-By source : {'pdf': 66}
-By doc_type : {'guide': 55, 'customs': 6,  'policy': 2, 'surcharge': 2, 'faq': 1}
+Total documents parsed : 96
+By source : {'html': 30, 'pdf': 66}
+By doc_type : {'customs': 13, 'guide': 66, 'faq': 5, 'policy': 7, 'integration': 1, 'surcharge': 4}
 ```
 
 ```bash
-python ls pdf_docs/
+ls pdf_docs/
 ```
 Check all name of pdf files to understand the content we have.
 
@@ -67,14 +68,15 @@ Chunks each document (1500 chars, 100 overlap), embeds using `all-MiniLM-L6-v2`,
 
 Output example:
 ```
-Total chunks: 813
-Unique source URLs : 40
+Total chunks: 933
+Unique source URLs : 65
 Chunks by doc_type:
-  guide           411
-  customs         67
-  surcharge       14
-  faq             5
-  policy          3
+  guide           331
+  customs         104
+  faq             24
+  policy          22
+  surcharge       17
+  integration     2
 ```
 
 ### Step 4 — Test retrieval
@@ -141,25 +143,56 @@ context, citations, found = retriever.retrieve(
 
 ## Knowledge Base
 
-| Source | Count   |
-|--------|---------|
-| DHL PDF documents | 66      |
-| **Chunks in ChromaDB** | **813** |
+| Source                 | Count   |
+|------------------------|---------|
+| DHL HTML documents     | 30      |
+| DHL PDF documents      | 66      |
+| **Chunks in ChromaDB** | **933** |
 
 ### Key documents included
 
-- DHL eCommerce Terms and Conditions (US, Canada, Malaysia, Israel)
-- DHL Express Rate and Service guides
-- Customs Clearance guides
-- Duty and Tax Prepayment guide
-- Battery Shipping Policy
-- Surcharge Policies (peak surcharges, fuel surcharges)
-- Prohibited and Restricted Items
-- Commercial Invoice templates
-- Packaging Guidelines
-- DHL e-Commerce Trends Reports (2024, 2025)
-- Power of Attorney forms
+**Customs & Clearance**
+- Customs Clearance FAQ (US)
+- Customs Clearance Documents guide (US)
+- Customs Clearance tips for international shipping (US, Global, Singapore)
+- Customs Clearance Must-Knows (Global Forwarding)
+- Customs Industry Guide 2020
+- Customs Management Control Tower
+- DHL Customs Services Brochure
+- Managing Customs in Uncertain Environments
+- Customs Declaration FAQ
+- Commercial Invoice templates and preparation guides
 
+**Shipping Services & Products**
+- DHL eCommerce Terms and Conditions (US, Canada, Malaysia, Israel, India)
+- DHL Express Rate and Service guides (Malaysia)
+- Parcel International Direct guides (US, Canada, France, Germany, Mexico, Thailand)
+- International Shipping steps guide
+- Basics of International Shipping
+- DHL Shipping Configuration and How-to Guide
+- Battery Shipping Policy (Canada, China)
+- Guidelines for Shipping Knives (US)
+- Shipment Value Protection and Limitation of Liability
+
+**Surcharges & Fees**
+- Peak Surcharge 2024-2025
+- Surcharges and Features guide
+- Duty and Tax Prepayment FAQ
+- Freight Terms and Conditions (Global, Germany)
+
+**Prohibited & Restricted Items**
+- Prohibited, Restricted and Dangerous Goods policy
+- Restricted Commodities guide
+- Power of Attorney forms (US)
+
+**Packaging**
+- Packaging Guidelines (LCL)
+- Protecting Goods During International Shipping
+
+**Industry Reports**
+- DHL e-Commerce Trends Reports (2024, 2025)
+- B2B E-commerce Guide
+- Trade Barometer (USA)
 ---
 
 ## Common Issues

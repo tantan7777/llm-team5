@@ -177,7 +177,19 @@ def main():
     documents = []
 
     # HTML pages are excluded — only PDF documents count as knowledge base sources
-    log.info("Skipping HTML files — only PDFs are used as documents")
+    # ── Process HTML files ────────────────────────────────────────────────────
+    if html_dir.exists():
+        html_files = list(html_dir.glob("*.html")) + list(html_dir.glob("*.htm"))
+        log.info("Found %d HTML files in %s", len(html_files), html_dir)
+        for path in sorted(html_files):
+            doc = parse_html_file(path)
+            if doc:
+                documents.append(doc)
+                log.info("  ✓ HTML  %-45s  %d chars", path.name[:45], len(doc["text"]))
+            else:
+                log.info("  ✗ HTML  %-45s  skipped (no content)", path.name[:45])
+    else:
+        log.warning("HTML directory not found: %s", html_dir)
 
     # ── Process PDF files ─────────────────────────────────────────────────────
     if pdf_dir.exists():
