@@ -84,6 +84,16 @@ Chunks by doc_type:
 ```bash
 python retriever.py "what documents are needed for customs clearance?"
 ```
+### Understanding Retrieval Scores
+
+When running `retriever.py`, each result shows a `score` between 0 and 1 representing **cosine similarity** — how semantically close the retrieved chunk is to your query.
+
+- `1.0` = perfect match
+- `0.5+` = strongly related
+- `0.1–0.3` = weakly related
+
+Current scores appear low (0.08–0.37) because we are using `DefaultEmbeddingFunction`, which has limited semantic understanding. This is expected and does not affect functionality — the ranking is correct and the agent retrieves the right context. Scores will improve significantly in Phase 2 when we switch to a stronger embedding model via the course-provided LLM endpoint.
+
 
 ---
 
