@@ -40,7 +40,7 @@ Download DHL PDF documents manually from the browser and place them in the `pdf_
 ### Step 2 — Parse documents
 
 ```bash
-python parse_local.py
+python parse_local.py # Generate raw_documents.json
 ```
 
 Reads all PDFs in `pdf_docs/`, extracts clean text, and saves to `raw_documents.json`.
@@ -55,7 +55,7 @@ By doc_type : {'guide': 47, 'customs': 6, 'surcharge': 2, 'faq': 1}
 ### Step 3 — Ingest into ChromaDB
 
 ```bash
-python ingest.py --reset
+python ingest.py --reset # Generate chroma_db/
 ```
 
 Chunks each document (1500 chars, 100 overlap), embeds using `all-MiniLM-L6-v2`, and upserts into ChromaDB.
