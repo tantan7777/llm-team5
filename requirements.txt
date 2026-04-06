@@ -1,0 +1,14 @@
+# CrossBorder Copilot — Phase 1 dependencies
+# Install with: pip install -r requirements.txt
+
+# Web scraping
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=4.9          # faster HTML parser for BeautifulSoup
+
+# Text chunking
+langchain-text-splitters>=0.0.1
+
+# Embeddings + vector store
+chromadb>=0.5
+sentence-transformers>=2.7   # provides all-MiniLM-L6-v2 locally
