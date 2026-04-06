@@ -35,7 +35,7 @@ Dependencies: `requests`, `beautifulsoup4`, `lxml`, `chromadb`, `sentence-transf
 
 ### Step 1 — Add PDF documents
 
-Download DHL PDF documents manually from the browser and place them in the `pdf_docs/` folder.
+Download DHL PDF documents manually from the browser and place them in the `pdf_docs/` folder. Manual download is required because DHL's servers block all automated requests (scraping, curl, and archive crawlers all return errors).
 
 ### Step 2 — Parse documents
 
@@ -47,10 +47,15 @@ Reads all PDFs in `pdf_docs/`, extracts clean text, and saves to `raw_documents.
 
 Output example:
 ```
-Total documents parsed : 56
-By source : {'pdf': 56}
-By doc_type : {'guide': 47, 'customs': 6, 'surcharge': 2, 'faq': 1}
+Total documents parsed : 66
+By source : {'pdf': 66}
+By doc_type : {'guide': 55, 'customs': 6,  'policy': 2, 'surcharge': 2, 'faq': 1}
 ```
+
+```bash
+python ls pdf_docs/
+```
+Check all name of pdf files to understand the content we have.
 
 ### Step 3 — Ingest into ChromaDB
 
@@ -62,13 +67,14 @@ Chunks each document (1500 chars, 100 overlap), embeds using `all-MiniLM-L6-v2`,
 
 Output example:
 ```
-Total chunks: 705
-Unique source URLs : 34
+Total chunks: 813
+Unique source URLs : 40
 Chunks by doc_type:
-  guide           414
+  guide           411
   customs         67
   surcharge       14
   faq             5
+  policy          3
 ```
 
 ### Step 4 — Test retrieval
@@ -135,10 +141,10 @@ context, citations, found = retriever.retrieve(
 
 ## Knowledge Base
 
-| Source | Count |
-|--------|-------|
-| DHL PDF documents | 56 |
-| **Chunks in ChromaDB** | **705** |
+| Source | Count   |
+|--------|---------|
+| DHL PDF documents | 66      |
+| **Chunks in ChromaDB** | **813** |
 
 ### Key documents included
 
