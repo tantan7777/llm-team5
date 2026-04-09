@@ -2,6 +2,11 @@
 ingest.py  —  CrossBorder Copilot Phase 1
 Reads raw_documents.json, chunks each document, and upserts into ChromaDB.
 
+Chunking strategy:
+  - Splits on paragraph → heading → sentence → word boundaries (in that priority)
+  - 1500-char chunks with 100-char overlap
+  - Preserves semantic coherence better than fixed-window splitting
+
 Usage:
     python ingest.py                          # ingest from raw_documents.json
     python ingest.py --input my_docs.json     # use a different source file
@@ -20,36 +25,105 @@ from chromadb.utils import embedding_functions
 
 
 class RecursiveCharacterTextSplitter:
-    """Simple fixed-size splitter — reliable, no infinite loops."""
+    """
+    Splits text recursively using a hierarchy of separators.
+    Tries paragraph breaks first, then headings, then sentences, then words.
+    This preserves semantic coherence — a chunk is more likely to contain
+    a complete thought rather than cutting mid-sentence.
+    """
 
-    def __init__(self, chunk_size=1500, chunk_overlap=100, **_):
+    def __init__(
+        self,
+        chunk_size: int = 1500,
+        chunk_overlap: int = 100,
+        separators: list[str] | None = None,
+        **_,
+    ):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.separators = separators or ["\n\n", "\n## ", "\n", ". ", " ", ""]
+
+    def _split_by_separator(self, text: str, separator: str) -> list[str]:
+        """Split text by a separator, keeping the separator attached."""
+        if separator == "":
+            return list(text)
+        parts = text.split(separator)
+        # Re-attach separator to the beginning of each part (except the first)
+        result = [parts[0]]
+        for p in parts[1:]:
+            result.append(separator + p)
+        return [p for p in result if p]
+
+    def _recursive_split(self, text: str, sep_index: int = 0) -> list[str]:
+        """Recursively split text, trying coarser separators first."""
+        if len(text) <= self.chunk_size:
+            return [text]
+
+        # If we've exhausted all separators, hard-cut
+        if sep_index >= len(self.separators):
+            chunks = []
+            start = 0
+            while start < len(text):
+                end = min(start + self.chunk_size, len(text))
+                chunks.append(text[start:end])
+                start += self.chunk_size - self.chunk_overlap
+            return chunks
+
+        separator = self.separators[sep_index]
+        parts = self._split_by_separator(text, separator)
+
+        # If this separator didn't help (only 1 part), try the next one
+        if len(parts) <= 1:
+            return self._recursive_split(text, sep_index + 1)
+
+        # Merge parts into chunks that fit within chunk_size
+        chunks = []
+        current = ""
+        for part in parts:
+            if len(current) + len(part) <= self.chunk_size:
+                current += part
+            else:
+                if current:
+                    chunks.append(current)
+                # If this single part is too big, split it recursively
+                if len(part) > self.chunk_size:
+                    sub_chunks = self._recursive_split(part, sep_index + 1)
+                    chunks.extend(sub_chunks)
+                    current = ""
+                else:
+                    current = part
+        if current:
+            chunks.append(current)
+
+        # Add overlap between chunks
+        if self.chunk_overlap > 0 and len(chunks) > 1:
+            overlapped = [chunks[0]]
+            for i in range(1, len(chunks)):
+                prev = chunks[i - 1]
+                overlap_text = prev[-self.chunk_overlap:] if len(prev) > self.chunk_overlap else prev
+                overlapped.append(overlap_text + chunks[i])
+            chunks = overlapped
+
+        return chunks
 
     def split_text(self, text: str) -> list[str]:
-        chunks = []
-        start = 0
-        while start < len(text):
-            end = min(start + self.chunk_size, len(text))
-            chunks.append(text[start:end])
-            start += self.chunk_size - self.chunk_overlap
-        return [c.strip() for c in chunks if c.strip()]
-
-
+        """Split text into chunks using recursive separator strategy."""
+        raw_chunks = self._recursive_split(text.strip())
+        # Clean up: strip whitespace, remove empty chunks
+        return [c.strip() for c in raw_chunks if c.strip() and len(c.strip()) > 50]
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-CHROMA_DIR     = "./chroma_db"           # persisted ChromaDB directory
+CHROMA_DIR      = "./chroma_db"           # persisted ChromaDB directory
 COLLECTION_NAME = "dhl_knowledge_base"
-INPUT_FILE     = Path("raw_documents.json")
+INPUT_FILE      = Path("raw_documents.json")
 
 # Chunking parameters
-CHUNK_SIZE    = 1500   # tokens (approximated as chars/4 by LangChain's default)
-CHUNK_OVERLAP = 100
+CHUNK_SIZE    = 1500   # characters per chunk
+CHUNK_OVERLAP = 100    # overlap between consecutive chunks
 
 # Embedding model — runs locally, no API key needed
-# Switch to "text-embedding-3-small" (OpenAI) or the course endpoint if preferred
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 BATCH_SIZE = 64    # ChromaDB upsert batch size
@@ -68,15 +142,13 @@ log = logging.getLogger(__name__)
 
 def make_splitter() -> RecursiveCharacterTextSplitter:
     """
-    RecursiveCharacterTextSplitter splits on paragraph → sentence → word
+    RecursiveCharacterTextSplitter splits on paragraph → heading → sentence → word
     boundaries, preserving semantic coherence better than a fixed-size split.
-    chunk_size=2000 chars ≈ 500 tokens for English text.
     """
     return RecursiveCharacterTextSplitter(
-        chunk_size=1500,
-        chunk_overlap=100,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n## ", "\n", ". ", " ", ""],
-        length_function=len,
     )
 
 
@@ -95,11 +167,11 @@ def chunk_document(doc: dict, splitter: RecursiveCharacterTextSplitter) -> list[
             "id": chunk_id,
             "text": text,
             "metadata": {
-                "url":        doc["url"],
-                "page_title": doc.get("page_title", ""),
-                "section":    doc.get("section", ""),
-                "doc_type":   doc.get("doc_type", "guide"),
-                "chunk_index": i,
+                "url":          doc["url"],
+                "page_title":   doc.get("page_title", ""),
+                "section":      doc.get("section", ""),
+                "doc_type":     doc.get("doc_type", "guide"),
+                "chunk_index":  i,
                 "total_chunks": len(chunks_text),
             },
         })
@@ -111,12 +183,7 @@ def chunk_document(doc: dict, splitter: RecursiveCharacterTextSplitter) -> list[
 def get_collection(reset: bool = False) -> chromadb.Collection:
     """Create or open the ChromaDB collection with a local embedding function."""
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-
-    from chromadb import EmbeddingFunction, Embeddings
-    import hashlib
-
     embed_fn = embedding_functions.DefaultEmbeddingFunction()
-
 
     if reset:
         try:
@@ -137,14 +204,12 @@ def upsert_in_batches(collection: chromadb.Collection, chunks: list[dict]):
     total = len(chunks)
     for start in range(0, total, BATCH_SIZE):
         batch = chunks[start : start + BATCH_SIZE]
-        log.info("  About to upsert batch %d-%d", start + 1, start + len(batch))
         collection.upsert(
             ids=[c["id"] for c in batch],
             documents=[c["text"] for c in batch],
             metadatas=[c["metadata"] for c in batch],
         )
         log.info("  Upserted %d–%d / %d chunks", start + 1, start + len(batch), total)
-
 
 
 # ── Stats helper ──────────────────────────────────────────────────────────────
@@ -157,7 +222,6 @@ def print_stats(collection: chromadb.Collection):
     if count == 0:
         return
 
-    # Sample a few random docs to show doc_type distribution
     results = collection.get(limit=min(count, 500), include=["metadatas"])
     from collections import Counter
     doc_types = Counter(m["doc_type"] for m in results["metadatas"])
@@ -192,7 +256,8 @@ def smoke_test(collection: chromadb.Collection):
             results["metadatas"][0],
             results["distances"][0],
         ):
-            print(f"  score={1 - dist:.3f}  [{meta['doc_type']}]  {meta['url']}")
+            score = 1 - dist
+            print(f"  score={score:.3f}  [{meta['doc_type']}]  {meta['url']}")
             print(f"  {doc[:120].replace(chr(10), ' ')}...")
 
 
@@ -246,3 +311,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
