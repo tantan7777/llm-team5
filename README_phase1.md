@@ -132,22 +132,31 @@ Wraps ChromaDB for use by the Phase 2 agent:
 from retriever import Retriever
 
 retriever = Retriever()
-context, citations, found = retriever.retrieve("what documents do I need to ship to the UK?")
+result = retriever.retrieve("what documents do I need to ship to the UK?")
 ```
 
-Returns:
-- `context` — formatted text chunks ready to inject into an LLM prompt
-- `citations` — list of `{title, url, doc_type}` dicts for source attribution
-- `found` — `True` if at least one relevant chunk was found
+Returns a dict with keys:
+
+- `result["context"]` — formatted text chunks ready to inject into an LLM prompt
+- `result["citations"]` — list of `{title, url, doc_type, score}` dicts for source attribution
+- `result["found"]` — `True` if at least one relevant chunk was found
+- `result["confidence"]` — `"high"`, `"medium"`, `"low"`, or `"none"`
+- `result["prompt"]` — complete LLM prompt with system instructions, context, and citation guidance
+- `result["results"]` — raw list of retrieved chunks for further processing
 
 Optional `doc_type_filter` to restrict search to a specific document type:
 
 ```python
-context, citations, found = retriever.retrieve(
+result = retriever.retrieve(
     "what items are prohibited?",
     doc_type_filter="policy"
 )
 ```
+
+Confidence levels determine agent response strategy:
+- **high** (score ≥ 0.50): answer confidently with citations
+- **medium** (score ≥ 0.25): answer with disclaimer
+- **none** (no results above threshold): inform user that info is not in knowledge base
 
 ---
 
