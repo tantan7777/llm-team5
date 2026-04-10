@@ -1,339 +1,297 @@
 """
-retriever.py  —  CrossBorder Copilot
-Reusable retrieval module consumed by the Phase 2 LangGraph agent.
+Reusable retrieval interface for CrossBorder Copilot's RAG layer.
 
-Features:
-  - Cosine similarity retrieval with configurable score threshold
-  - Confidence-level classification (high / medium / low / none)
-  - No-answer handling: returns found=False when knowledge base has no relevant info
-  - Prompt template builder: packages retrieved context into a ready-to-send LLM prompt
-  - Source citation formatting with deduplication
+The public entry point is Retriever.retrieve(query, k=5, filters=None). It
+returns structured chunks with text, score, source filename, title, page range,
+chunk id, and full metadata for downstream citation handling.
 
-Usage (standalone smoke test):
-    python retriever.py "what documents do I need to ship to Germany?"
-    python retriever.py --verbose "prohibited items for shipping batteries"
+Usage:
+    python retriever.py "customs clearance documents" -k 5
+    python retriever.py "dangerous goods batteries" --filter category=restricted_goods
 """
 
 from __future__ import annotations
-import sys
+
+import argparse
 import logging
+import math
+from pathlib import Path
+from typing import Any
 
 import chromadb
-from chromadb.utils import embedding_functions
+from chromadb.api.models.Collection import Collection
 
-# ── Config (must match ingest.py) ─────────────────────────────────────────────
-CHROMA_DIR      = "./chroma_db"
-COLLECTION_NAME = "dhl_knowledge_base"
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-DEFAULT_TOP_K   = 5
-MIN_SCORE       = 0.25   # cosine similarity threshold; chunks below this are dropped
+from ingest import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, make_embedding_function
 
-# Confidence thresholds — used by the agent to decide response strategy
-CONFIDENCE_HIGH   = 0.50  # top-1 score >= 0.50 → answer confidently with citations
-CONFIDENCE_MEDIUM = 0.25  # top-1 score >= 0.25 → answer with disclaimer
-                          # top-1 score <  0.25 → no relevant info found
+
+DEFAULT_TOP_K = 5
+CONFIDENCE_HIGH = 0.55
+CONFIDENCE_MEDIUM = 0.30
 
 log = logging.getLogger(__name__)
 
 
-# ── System prompt template ────────────────────────────────────────────────────
-
-SYSTEM_PROMPT = """You are CrossBorder Copilot, an AI support agent for cross-border ecommerce shipping.
-Your knowledge base contains DHL shipping documentation, customs clearance guides, surcharge policies,
-prohibited items lists, and business support FAQs.
-
-RULES:
-1. Answer ONLY based on the provided context below. Do not use outside knowledge.
-2. If the context does not contain enough information to answer the question, say:
-   "I don't have enough information in my knowledge base to answer that. Please contact DHL support directly."
-3. Always cite your sources using [Source N] references that match the context labels.
-4. If the user asks about topics unrelated to shipping, customs, or logistics, politely decline
-   and redirect them to the appropriate resource.
-5. Be concise and professional. Use bullet points for multi-step instructions.
-"""
-
-RAG_PROMPT_TEMPLATE = """{system_prompt}
-
---- RETRIEVED CONTEXT (confidence: {confidence}) ---
-{context}
---- END CONTEXT ---
-
-CITATIONS AVAILABLE:
-{citations_block}
-
-USER QUESTION: {query}
-
-Respond based on the context above. Cite sources as [Source N] where applicable.
-If confidence is "low" or "none", inform the user that you could not find a reliable answer."""
+SYSTEM_PROMPT = """You are CrossBorder Copilot, a support assistant for cross-border ecommerce shipping.
+Answer only from the retrieved DHL-related context. If the context is insufficient, say that the knowledge base does not contain enough information and recommend contacting DHL support. Cite sources using the provided source labels."""
 
 
 class Retriever:
-    """
-    Retrieval module for CrossBorder Copilot.
+    """Thin wrapper around a persistent ChromaDB collection."""
 
-    Handles:
-      - Vector similarity search against ChromaDB
-      - Score-based filtering and confidence classification
-      - Context formatting with source labels
-      - Full prompt construction for the LLM
-
-    Example
-    -------
-    retriever = Retriever()
-    result    = retriever.retrieve("commercial invoice requirements UK")
-    prompt    = retriever.build_prompt("commercial invoice requirements UK", result)
-    """
-
-    def __init__(self, chroma_dir: str = CHROMA_DIR):
-        client = chromadb.PersistentClient(path=chroma_dir)
-        embed_fn = embedding_functions.DefaultEmbeddingFunction()
-
-        self.collection = client.get_collection(
-            name=COLLECTION_NAME,
-            embedding_function=embed_fn,
-        )
-
-    # ── Core query ────────────────────────────────────────────────────────────
-
-    def query(
+    def __init__(
         self,
-        query_text: str,
-        top_k: int = DEFAULT_TOP_K,
-        doc_type_filter: str | None = None,
-    ) -> list[dict]:
-        """
-        Retrieve the top-k most relevant chunks.
+        chroma_dir: str | Path = CHROMA_DIR,
+        collection_name: str = COLLECTION_NAME,
+        embedding_model: str = EMBEDDING_MODEL,
+        local_files_only: bool = False,
+    ) -> None:
+        self.chroma_dir = str(chroma_dir)
+        self.collection_name = collection_name
+        self.embedding_model = embedding_model
+        self.local_files_only = local_files_only
+        self.collection = self._load_collection()
 
-        Parameters
-        ----------
-        query_text      : natural language question
-        top_k           : number of results to return
-        doc_type_filter : restrict to a specific doc_type
-                          ("faq", "customs", "policy", "surcharge", "guide")
-
-        Returns
-        -------
-        List of dicts with keys: text, score, url, page_title, section, doc_type, relevance
-        """
-        where = {"doc_type": doc_type_filter} if doc_type_filter else None
-
-        raw = self.collection.query(
-            query_texts=[query_text],
-            n_results=top_k,
-            include=["documents", "metadatas", "distances"],
-            where=where,
-        )
-
-        results = []
-        for text, meta, dist in zip(
-            raw["documents"][0],
-            raw["metadatas"][0],
-            raw["distances"][0],
-        ):
-            score = 1.0 - dist          # convert cosine distance → similarity
-            if score < MIN_SCORE:
-                continue
-
-            # Tag each chunk with a relevance label so the LLM knows what to trust
-            if score >= CONFIDENCE_HIGH:
-                relevance = "high"
-            elif score >= CONFIDENCE_MEDIUM:
-                relevance = "medium"
-            else:
-                relevance = "low"
-
-            results.append({
-                "text":       text,
-                "score":      round(score, 4),
-                "relevance":  relevance,
-                "url":        meta.get("url", ""),
-                "page_title": meta.get("page_title", ""),
-                "section":    meta.get("section", ""),
-                "doc_type":   meta.get("doc_type", ""),
-            })
-
-        return results
-
-    # ── Confidence classification ─────────────────────────────────────────────
-
-    @staticmethod
-    def classify_confidence(results: list[dict]) -> str:
-        """
-        Classify overall retrieval confidence based on the top-1 result score.
-
-        Returns
-        -------
-        "high"   : top-1 score >= 0.50 — answer confidently
-        "medium" : top-1 score >= 0.25 — answer with disclaimer
-        "low"    : results exist but all below 0.25 — weak match
-        "none"   : no results passed MIN_SCORE — refuse to answer
-        """
-        if not results:
-            return "none"
-        top_score = results[0]["score"]
-        if top_score >= CONFIDENCE_HIGH:
-            return "high"
-        elif top_score >= CONFIDENCE_MEDIUM:
-            return "medium"
-        else:
-            return "low"
-
-    # ── Formatting helpers ────────────────────────────────────────────────────
-
-    def format_context(self, results: list[dict]) -> str:
-        """
-        Build a context string to inject into an LLM prompt.
-        Each chunk is labelled with source, relevance, and doc_type
-        so the LLM can prioritize high-relevance chunks and cite properly.
-        """
-        if not results:
-            return "(No relevant documents found in the knowledge base.)"
-
-        parts = []
-        for i, r in enumerate(results, 1):
-            parts.append(
-                f"[Source {i}] (relevance: {r['relevance']}, type: {r['doc_type']})\n"
-                f"Title: {r['page_title']}\n"
-                f"URL: {r['url']}\n"
-                f"{r['text']}"
+    def _load_collection(self) -> Collection:
+        client = chromadb.PersistentClient(path=self.chroma_dir)
+        try:
+            return client.get_collection(
+                name=self.collection_name,
+                embedding_function=make_embedding_function(
+                    self.embedding_model,
+                    local_files_only=self.local_files_only,
+                ),
             )
-        return "\n\n---\n\n".join(parts)
-
-    def format_citations(self, results: list[dict]) -> list[dict]:
-        """
-        Return a compact list of unique citations for the agent to attach
-        to its response (deduped by URL).
-        """
-        seen: set[str] = set()
-        citations = []
-        for r in results:
-            if r["url"] not in seen:
-                seen.add(r["url"])
-                citations.append({
-                    "title":    r["page_title"] or r["section"],
-                    "url":      r["url"],
-                    "doc_type": r["doc_type"],
-                    "score":    r["score"],
-                })
-        return citations
-
-    def _citations_block(self, citations: list[dict]) -> str:
-        """Format citations as a readable block for the prompt."""
-        if not citations:
-            return "(No sources available)"
-        lines = []
-        for i, c in enumerate(citations, 1):
-            lines.append(f"  [Source {i}] {c['title']} — {c['url']}")
-        return "\n".join(lines)
-
-    # ── Prompt builder ────────────────────────────────────────────────────────
-
-    def build_prompt(
-        self,
-        query: str,
-        results: list[dict],
-        confidence: str | None = None,
-    ) -> str:
-        """
-        Construct a complete LLM prompt with system instructions,
-        retrieved context, citation list, and the user question.
-
-        Parameters
-        ----------
-        query      : the user's original question
-        results    : list of retrieved chunks from self.query()
-        confidence : override confidence level; auto-classified if None
-
-        Returns
-        -------
-        A fully formatted prompt string ready to send to the LLM.
-        """
-        if confidence is None:
-            confidence = self.classify_confidence(results)
-
-        context   = self.format_context(results)
-        citations = self.format_citations(results)
-
-        return RAG_PROMPT_TEMPLATE.format(
-            system_prompt=SYSTEM_PROMPT.strip(),
-            confidence=confidence,
-            context=context,
-            citations_block=self._citations_block(citations),
-            query=query,
-        )
-
-    # ── High-level retrieve (used by Phase 2 agent) ───────────────────────────
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not open Chroma collection '{self.collection_name}' at {self.chroma_dir}. "
+                "Run `python ingest.py --reset` first."
+            ) from exc
 
     def retrieve(
         self,
-        query_text: str,
-        top_k: int = DEFAULT_TOP_K,
+        query: str,
+        k: int = DEFAULT_TOP_K,
+        filters: dict[str, Any] | None = None,
+        score_threshold: float | None = None,
+        where_document: dict[str, Any] | None = None,
+        top_k: int | None = None,
         doc_type_filter: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
-        High-level retrieval method used by the agent.
+        Retrieve top-k semantically relevant chunks.
 
-        Returns
-        -------
-        dict with keys:
-            context    : formatted context string for the LLM prompt
-            citations  : list of {title, url, doc_type, score} dicts
-            found      : True if at least one chunk passed the score threshold
-            confidence : "high", "medium", "low", or "none"
-            results    : raw list of retrieved chunks (for further processing)
-            prompt     : complete LLM prompt ready to send
+        Parameters
+        ----------
+        query:
+            Natural language merchant-support question.
+        k:
+            Number of chunks to return.
+        filters:
+            Optional Chroma metadata filters, for example
+            {"category": "customs"} or {"source_filename": "sg_commercial_invoice.pdf"}.
+        score_threshold:
+            Optional minimum similarity score. By default all top-k results are
+            returned so downstream callers can make their own confidence choice.
+        where_document:
+            Optional Chroma document-text filter.
         """
-        results    = self.query(query_text, top_k=top_k, doc_type_filter=doc_type_filter)
-        context    = self.format_context(results)
-        citations  = self.format_citations(results)
-        confidence = self.classify_confidence(results)
-        found      = len(results) > 0
-        prompt     = self.build_prompt(query_text, results, confidence)
+        if top_k is not None:
+            k = top_k
+        if doc_type_filter:
+            filters = dict(filters or {})
+            filters["doc_type"] = doc_type_filter
 
+        raw = self.collection.query(
+            query_texts=[query],
+            n_results=k,
+            where=filters,
+            where_document=where_document,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        results = []
+        for text, metadata, distance in zip(
+            raw.get("documents", [[]])[0],
+            raw.get("metadatas", [[]])[0],
+            raw.get("distances", [[]])[0],
+        ):
+            score = distance_to_score(distance)
+            if score_threshold is not None and score < score_threshold:
+                continue
+            results.append(format_result(text, metadata, score))
+
+        confidence = classify_confidence(results)
         return {
-            "context":    context,
-            "citations":  citations,
-            "found":      found,
+            "query": query,
+            "found": bool(results),
             "confidence": confidence,
-            "results":    results,
-            "prompt":     prompt,
+            "results": results,
+            "citations": format_citations(results),
+            "context": format_context(results),
         }
 
+    def pretty_print(self, retrieval_result: dict[str, Any], show_text: bool = False) -> None:
+        pretty_print(retrieval_result, show_text=show_text)
 
-# ── Standalone smoke test ─────────────────────────────────────────────────────
+    def build_prompt(self, query: str, retrieval_result: dict[str, Any]) -> str:
+        """Build a compact grounded-answer prompt for an LLM caller."""
+        return (
+            f"{SYSTEM_PROMPT}\n\n"
+            f"Retrieved context, confidence={retrieval_result['confidence']}:\n"
+            f"{retrieval_result['context']}\n\n"
+            f"Question: {query}\n"
+            "Answer with citations such as [Source 1]."
+        )
+
+
+def distance_to_score(distance: float | int | None) -> float:
+    """Convert Chroma cosine distance to a readable similarity score."""
+    if distance is None:
+        return 0.0
+    try:
+        value = 1.0 - float(distance)
+    except (TypeError, ValueError):
+        return 0.0
+    if math.isnan(value):
+        return 0.0
+    return round(max(min(value, 1.0), -1.0), 4)
+
+
+def format_result(text: str, metadata: dict[str, Any], score: float) -> dict[str, Any]:
+    source_filename = str(metadata.get("source_filename", ""))
+    title = str(metadata.get("title", ""))
+    page_range = str(metadata.get("page_range", metadata.get("page_number", "")))
+    return {
+        "text": text,
+        "score": score,
+        "source_filename": source_filename,
+        "title": title,
+        "page_number": metadata.get("page_number", ""),
+        "page_range": page_range,
+        "chunk_id": metadata.get("chunk_id", ""),
+        "document_id": metadata.get("document_id", ""),
+        "category": metadata.get("category", ""),
+        "doc_type": metadata.get("doc_type", metadata.get("category", "")),
+        "source_uri": metadata.get("source_uri", ""),
+        "metadata": dict(metadata),
+    }
+
+
+def classify_confidence(results: list[dict[str, Any]]) -> str:
+    if not results:
+        return "none"
+    top_score = float(results[0]["score"])
+    if top_score >= CONFIDENCE_HIGH:
+        return "high"
+    if top_score >= CONFIDENCE_MEDIUM:
+        return "medium"
+    return "low"
+
+
+def format_citations(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return unique source citations in result order."""
+    citations = []
+    seen: set[tuple[str, str]] = set()
+    for result in results:
+        key = (str(result["source_filename"]), str(result["page_range"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            {
+                "source_filename": result["source_filename"],
+                "title": result["title"],
+                "page_range": result["page_range"],
+                "category": result["category"],
+                "doc_type": result["doc_type"],
+                "score": result["score"],
+                "source_uri": result["source_uri"],
+            }
+        )
+    return citations
+
+
+def format_context(results: list[dict[str, Any]], max_chars_per_chunk: int = 1400) -> str:
+    if not results:
+        return "(No relevant chunks retrieved.)"
+
+    blocks = []
+    for index, result in enumerate(results, start=1):
+        text = result["text"]
+        if len(text) > max_chars_per_chunk:
+            text = f"{text[:max_chars_per_chunk].rstrip()}..."
+        blocks.append(
+            f"[Source {index}] {result['title']} "
+            f"({result['source_filename']}, p. {result['page_range']}, {result['category']})\n"
+            f"{text}"
+        )
+    return "\n\n---\n\n".join(blocks)
+
+
+def pretty_print(retrieval_result: dict[str, Any], show_text: bool = False) -> None:
+    print(f"\nQuery      : {retrieval_result['query']}")
+    print(f"Found      : {retrieval_result['found']}")
+    print(f"Confidence : {retrieval_result['confidence']}")
+    print(f"Results    : {len(retrieval_result['results'])}")
+
+    for index, result in enumerate(retrieval_result["results"], start=1):
+        print(
+            f"\n[{index}] score={result['score']:.3f}  "
+            f"{result['source_filename']} p.{result['page_range']}  "
+            f"[{result['category']}]"
+        )
+        print(f"    title    : {result['title']}")
+        print(f"    chunk_id : {result['chunk_id']}")
+        if show_text:
+            print(f"    text     : {result['text'][:1200]}")
+
+
+def parse_filter(value: str) -> tuple[str, str]:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("filters must use key=value syntax")
+    key, filter_value = value.split("=", 1)
+    key = key.strip()
+    filter_value = filter_value.strip()
+    if not key or not filter_value:
+        raise argparse.ArgumentTypeError("filters must use key=value syntax")
+    return key, filter_value
+
+
+def retrieve(query: str, k: int = DEFAULT_TOP_K, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Convenience function for simple downstream imports."""
+    return Retriever().retrieve(query, k=k, filters=filters)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Query the local DHL RAG knowledge base.")
+    parser.add_argument("query", nargs="*", help="Question to retrieve context for")
+    parser.add_argument("-k", "--top-k", type=int, default=DEFAULT_TOP_K)
+    parser.add_argument("--filter", action="append", type=parse_filter, default=[], help="Metadata filter key=value")
+    parser.add_argument("--min-score", type=float, default=None, help="Optional minimum similarity score")
+    parser.add_argument("--chroma-dir", default=str(CHROMA_DIR))
+    parser.add_argument("--collection", default=COLLECTION_NAME)
+    parser.add_argument("--embedding-model", default=EMBEDDING_MODEL)
+    parser.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="Load the embedding model from the local Hugging Face cache only",
+    )
+    parser.add_argument("--show-text", action="store_true", help="Print retrieved chunk text")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s  %(message)s")
+    query = " ".join(args.query).strip() or "What documents are needed for customs clearance?"
+    filters = dict(args.filter) if args.filter else None
+
+    retriever = Retriever(
+        chroma_dir=args.chroma_dir,
+        collection_name=args.collection,
+        embedding_model=args.embedding_model,
+        local_files_only=args.local_files_only,
+    )
+    result = retriever.retrieve(query, k=args.top_k, filters=filters, score_threshold=args.min_score)
+    retriever.pretty_print(result, show_text=args.show_text)
+
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
-
-    verbose = "--verbose" in sys.argv
-    args = [a for a in sys.argv[1:] if a != "--verbose"]
-    query = " ".join(args) or "What documents are needed for customs clearance?"
-
-    print(f"\nQuery: {query}\n")
-
-    retriever = Retriever()
-    result = retriever.retrieve(query)
-
-    print(f"Found: {result['found']}")
-    print(f"Confidence: {result['confidence']}")
-    print(f"Chunks retrieved: {len(result['results'])}")
-
-    if result["results"]:
-        print(f"Top score: {result['results'][0]['score']}")
-
-    if not result["found"]:
-        print("\nNo relevant documents found above score threshold.")
-        print("The agent would respond: 'I don't have enough information in my")
-        print("knowledge base to answer that. Please contact DHL support directly.'")
-    else:
-        print("\n=== Context (first 1500 chars) ===")
-        print(result["context"][:1500])
-        print("\n=== Citations ===")
-        for c in result["citations"]:
-            print(f"  [{c['doc_type']}] (score: {c['score']})  {c['title']}")
-            print(f"           {c['url']}")
-
-    if verbose:
-        print("\n=== Full LLM Prompt ===")
-        print(result["prompt"])
-
+    main()

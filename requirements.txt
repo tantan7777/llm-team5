@@ -9,6 +9,9 @@ lxml>=4.9          # faster HTML parser for BeautifulSoup
 # Text chunking
 langchain-text-splitters>=0.0.1
 
+# PDF parsing
+pypdf>=4.2
+
 # Embeddings + vector store
 chromadb>=0.5
 sentence-transformers>=2.7   # provides all-MiniLM-L6-v2 locally
