@@ -1,6 +1,6 @@
 # Phase 1 — RAG Pipeline
 
-This phase builds the local retrieval layer for CrossBorder Copilot. It parses DHL-related PDFs from `pdf_docs/`, chunks them with metadata, embeds the chunks, stores them in ChromaDB, and exposes a reusable retrieval API for a downstream support agent.
+This phase builds the local retrieval layer for CrossBorder Copilot. It parses DHL-related PDFs from `pdf_docs/` and saved DHL articles from `html_pages/`, chunks them with metadata, embeds the chunks, stores them in ChromaDB, and exposes a reusable retrieval API for a downstream support agent.
 
 ## Setup
 
@@ -8,13 +8,13 @@ This phase builds the local retrieval layer for CrossBorder Copilot. It parses D
 python -m pip install -r requirements.txt
 ```
 
-## Parse PDFs
+## Parse Local Documents
 
 ```bash
-python parse_local.py --pdf-dir pdf_docs --output raw_documents.json
+python parse_local.py --pdf-dir pdf_docs --html-dir html_pages --output raw_documents.json
 ```
 
-`parse_local.py` writes one record per PDF page. Metadata includes source filename, title, inferred category, page number, total pages, raw text, and cleaned text.
+`parse_local.py` writes one record per PDF page and one record per saved HTML article. Metadata includes source type, source filename, title, inferred category, page number, total pages, raw text, and cleaned text.
 
 ## Ingest Into ChromaDB
 
@@ -25,6 +25,7 @@ python ingest.py --reset
 Defaults:
 
 - PDF input: `pdf_docs/`
+- HTML input: `html_pages/`
 - Chroma path: `chroma_db/`
 - Collection: `dhl_knowledge_base`
 - Embedding model: `all-MiniLM-L6-v2`
@@ -35,6 +36,7 @@ Useful commands:
 
 ```bash
 python ingest.py --stats
+python ingest.py --no-html
 python ingest.py --chunk-size 900 --chunk-overlap 150
 python ingest.py --embedding-model all-MiniLM-L6-v2 --no-smoke-test
 python ingest.py --local-files-only
@@ -74,6 +76,7 @@ The evaluator uses DHL support-domain queries such as prohibited items, customs 
 This phase intentionally covers only the RAG layer:
 
 - local PDF parsing
+- local HTML article parsing
 - text cleaning
 - chunking and metadata preservation
 - embeddings and ChromaDB storage

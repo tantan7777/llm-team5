@@ -4,15 +4,16 @@ Conversational support assistant for cross-border ecommerce shipping. This repos
 
 ## RAG Pipeline
 
-The RAG module ingests local PDFs from `pdf_docs/`, extracts clean page text and metadata, chunks the documents, embeds chunks with a configurable SentenceTransformers model, and persists them in ChromaDB for downstream agent use.
+The RAG module ingests local PDFs from `pdf_docs/` and saved DHL articles from `html_pages/`, extracts clean text and metadata, chunks the documents, embeds chunks with a configurable SentenceTransformers model, and persists them in ChromaDB for downstream agent use.
 
 ### Files
 
-- `parse_local.py` parses local PDFs into structured page records.
+- `parse_local.py` parses local PDFs and saved HTML articles into structured records.
 - `ingest.py` runs the parse, chunk, embed, and ChromaDB ingestion pipeline.
 - `retriever.py` exposes `Retriever.retrieve(query, k=5, filters=None)`.
 - `eval_retrieval.py` runs a small DHL-domain retrieval evaluation.
-- `pdf_docs/` contains the local DHL-related PDF knowledge base.
+- `pdf_docs/` contains local DHL-related PDFs.
+- `html_pages/` contains saved DHL-related article pages.
 - `chroma_db/` is generated locally after ingestion.
 
 ### Install
@@ -21,15 +22,15 @@ The RAG module ingests local PDFs from `pdf_docs/`, extracts clean page text and
 python -m pip install -r requirements.txt
 ```
 
-### Optional: Inspect Parsed PDFs
+### Optional: Inspect Parsed Documents
 
 ```bash
-python parse_local.py --pdf-dir pdf_docs --output raw_documents.json
+python parse_local.py --pdf-dir pdf_docs --html-dir html_pages --output raw_documents.json
 ```
 
-This writes one JSON record per extracted PDF page with fields such as source filename, title, category, page number, raw text, and cleaned text.
+This writes one JSON record per extracted PDF page and one record per saved HTML article with fields such as source filename, source type, title, category, page number, raw text, and cleaned text.
 
-### Ingest Local PDFs
+### Ingest Local Documents
 
 ```bash
 python ingest.py --reset
@@ -38,13 +39,14 @@ python ingest.py --reset
 Useful options:
 
 ```bash
-python ingest.py --pdf-dir pdf_docs --chroma-dir chroma_db --collection dhl_knowledge_base
+python ingest.py --pdf-dir pdf_docs --html-dir html_pages --chroma-dir chroma_db --collection dhl_knowledge_base
+python ingest.py --no-html
 python ingest.py --embedding-model all-MiniLM-L6-v2 --chunk-size 800 --chunk-overlap 120
 python ingest.py --local-files-only
 python ingest.py --stats
 ```
 
-The ingestion summary reports files processed, parsed pages, chunks created, chunks stored, and final collection size.
+The ingestion summary reports files processed, parsed PDF/HTML records, chunks created, chunks stored, and final collection size.
 
 ### Run One Retrieval Query
 

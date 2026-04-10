@@ -1,8 +1,9 @@
 """
-Ingest local DHL PDF documents into a persistent ChromaDB collection.
+Ingest local DHL PDF and saved HTML documents into a persistent ChromaDB collection.
 
-The pipeline parses PDFs from pdf_docs/, chunks cleaned page text, embeds each
-chunk, and upserts it into ChromaDB with citation-friendly metadata.
+The pipeline parses PDFs from pdf_docs/ plus saved HTML articles from
+html_pages/, chunks cleaned text, embeds each chunk, and upserts it into ChromaDB
+with citation-friendly metadata.
 
 Usage:
     python ingest.py --reset
@@ -24,7 +25,7 @@ import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.utils import embedding_functions
 
-from parse_local import parse_local_documents
+from parse_local import HTML_DIR, parse_local_documents
 
 
 PDF_DIR = Path("pdf_docs")
@@ -362,6 +363,8 @@ def upsert_chunks(collection: Collection, chunks: list[TextChunk], batch_size: i
 
 def ingest_documents(
     pdf_dir: Path | str = PDF_DIR,
+    html_dir: Path | str | None = HTML_DIR,
+    include_html: bool = True,
     chroma_dir: Path | str = CHROMA_DIR,
     collection_name: str = COLLECTION_NAME,
     embedding_model: str = EMBEDDING_MODEL,
@@ -374,7 +377,7 @@ def ingest_documents(
     delete_existing: bool = True,
 ) -> dict[str, int]:
     """Run the full parse -> chunk -> Chroma ingestion pipeline."""
-    parsed_pages = parse_local_documents(pdf_dir)
+    parsed_pages = parse_local_documents(pdf_dir, html_dir=html_dir, include_html=include_html)
     chunks = chunk_parsed_documents(
         parsed_pages,
         chunk_size=chunk_size,
@@ -396,7 +399,9 @@ def ingest_documents(
     stored = upsert_chunks(collection, chunks, batch_size=batch_size)
     summary = {
         "files_processed": len({page["source_filename"] for page in parsed_pages}),
-        "parsed_pages": len(parsed_pages),
+        "records_parsed": len(parsed_pages),
+        "pdf_records": sum(1 for page in parsed_pages if page.get("source_type") == "pdf"),
+        "html_records": sum(1 for page in parsed_pages if page.get("source_type") == "html"),
         "chunks_created": len(chunks),
         "chunks_stored": stored,
         "collection_count": collection.count(),
@@ -423,11 +428,11 @@ def print_stats(
     if count == 0:
         return
 
-    sample = collection.get(limit=min(count, 1000), include=["metadatas"])
+    sample = collection.get(limit=count, include=["metadatas"])
     metadatas = sample.get("metadatas", [])
     categories = Counter(meta.get("category", "unknown") for meta in metadatas)
     filenames = Counter(meta.get("source_filename", "unknown") for meta in metadatas)
-    print(f"Sources    : {len(filenames)} in first {len(metadatas)} chunks")
+    print(f"Sources    : {len(filenames)}")
     print("Categories :")
     for category, value in categories.most_common():
         print(f"  {category:<18} {value}")
@@ -467,8 +472,10 @@ def smoke_test(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest local DHL PDFs into ChromaDB.")
+    parser = argparse.ArgumentParser(description="Ingest local DHL PDFs and saved HTML articles into ChromaDB.")
     parser.add_argument("--pdf-dir", default=str(PDF_DIR), help="Directory containing PDFs")
+    parser.add_argument("--html-dir", default=str(HTML_DIR), help="Directory containing saved HTML pages")
+    parser.add_argument("--no-html", action="store_true", help="Only ingest PDFs")
     parser.add_argument("--chroma-dir", default=str(CHROMA_DIR), help="Persistent ChromaDB directory")
     parser.add_argument("--collection", default=COLLECTION_NAME, help="ChromaDB collection name")
     parser.add_argument("--embedding-model", default=EMBEDDING_MODEL, help="SentenceTransformers model name")
@@ -495,6 +502,8 @@ def main() -> None:
 
     summary = ingest_documents(
         pdf_dir=args.pdf_dir,
+        html_dir=args.html_dir,
+        include_html=not args.no_html,
         chroma_dir=args.chroma_dir,
         collection_name=args.collection,
         embedding_model=args.embedding_model,
@@ -508,7 +517,9 @@ def main() -> None:
 
     print("\nIngestion summary")
     print(f"  Files processed       : {summary['files_processed']}")
-    print(f"  Parsed documents/pages: {summary['parsed_pages']}")
+    print(f"  Parsed records        : {summary['records_parsed']}")
+    print(f"  PDF page records      : {summary['pdf_records']}")
+    print(f"  HTML article records  : {summary['html_records']}")
     print(f"  Chunks created        : {summary['chunks_created']}")
     print(f"  Chunks stored         : {summary['chunks_stored']}")
     print(f"  Collection size       : {summary['collection_count']}")

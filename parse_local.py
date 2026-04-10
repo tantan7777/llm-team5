@@ -1,13 +1,13 @@
 """
-Parse local DHL PDF documents for the CrossBorder Copilot RAG pipeline.
+Parse local DHL PDF and saved HTML documents for the CrossBorder Copilot RAG pipeline.
 
-The parser returns one structured record per extracted PDF page. Each record
-contains clean text plus metadata that downstream chunking and citation code can
-preserve in ChromaDB.
+The parser returns one structured record per extracted PDF page and one record
+per saved HTML article. Each record contains clean text plus metadata that
+downstream chunking and citation code can preserve in ChromaDB.
 
 Usage:
     python parse_local.py
-    python parse_local.py --pdf-dir pdf_docs --output raw_documents.json
+    python parse_local.py --pdf-dir pdf_docs --html-dir html_pages --output raw_documents.json
 """
 
 from __future__ import annotations
@@ -23,12 +23,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
+from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
 
+HTML_DIR = Path("html_pages")
 PDF_DIR = Path("pdf_docs")
 OUTPUT_FILE = Path("raw_documents.json")
 MIN_PAGE_CHARS = 40
+MIN_HTML_CHARS = 100
 
 log = logging.getLogger(__name__)
 logging.getLogger("pypdf").setLevel(logging.CRITICAL)
@@ -265,7 +268,75 @@ def parse_pdf_file(path: Path, min_page_chars: int = MIN_PAGE_CHARS) -> list[dic
     return parsed_pages
 
 
-def parse_local_documents(pdf_dir: Path | str = PDF_DIR, min_page_chars: int = MIN_PAGE_CHARS) -> list[dict]:
+def clean_html_text(text: str) -> str:
+    """Normalize HTML article text while preserving section boundaries."""
+    text = unicodedata.normalize("NFKC", text or "")
+    text = text.replace("\x00", " ")
+    lines = [normalize_line(line) for line in text.splitlines()]
+    text = "\n".join(line for line in lines if line)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def parse_html_file(path: Path, min_chars: int = MIN_HTML_CHARS) -> list[dict]:
+    """Parse one saved DHL HTML page into a structured document record."""
+    try:
+        soup = BeautifulSoup(path.read_text(encoding="utf-8", errors="ignore"), "html.parser")
+    except Exception as exc:
+        log.warning("Could not parse HTML %s: %s", path.name, exc)
+        return []
+
+    for tag in soup.find_all(["nav", "footer", "header", "script", "style", "noscript", "aside", "form", "svg"]):
+        tag.decompose()
+
+    title = ""
+    if soup.title and soup.title.get_text(strip=True):
+        title = normalize_line(soup.title.get_text(" ", strip=True))
+
+    main = soup.find("main") or soup.find("article") or soup.find(id="main-content") or soup.body
+    if not main:
+        return []
+
+    if not title:
+        heading = main.find(["h1", "h2"])
+        title = normalize_line(heading.get_text(" ", strip=True)) if heading else path.stem
+
+    lines: list[str] = []
+    for element in main.find_all(["h1", "h2", "h3", "h4", "p", "li", "dt", "dd", "th", "td"]):
+        text = normalize_line(element.get_text(" ", strip=True))
+        if len(text) < 3:
+            continue
+        if element.name in {"h1", "h2", "h3", "h4"}:
+            lines.append(f"\n## {text}")
+        else:
+            lines.append(text)
+
+    text = clean_html_text("\n".join(lines))
+    if len(text) < min_chars:
+        log.warning("HTML %s yielded very little text, skipping", path.name)
+        return []
+
+    document_id = make_document_id(path)
+    return [
+        asdict(
+            ParsedDocument(
+                document_id=document_id,
+                source_type="html",
+                source_filename=path.name,
+                source_path=path.as_posix(),
+                source_uri=f"file://{path.as_posix()}",
+                title=title[:180],
+                category=infer_category(path),
+                page_number=1,
+                total_pages=1,
+                raw_text=main.get_text("\n", strip=True),
+                text=text,
+            )
+        )
+    ]
+
+
+def parse_pdf_documents(pdf_dir: Path | str = PDF_DIR, min_page_chars: int = MIN_PAGE_CHARS) -> list[dict]:
     """Parse all PDFs from a local directory."""
     pdf_path = Path(pdf_dir)
     if not pdf_path.exists():
@@ -288,6 +359,39 @@ def parse_local_documents(pdf_dir: Path | str = PDF_DIR, min_page_chars: int = M
     return documents
 
 
+def parse_html_documents(html_dir: Path | str = HTML_DIR, min_html_chars: int = MIN_HTML_CHARS) -> list[dict]:
+    """Parse all saved HTML pages from a local directory."""
+    html_path = Path(html_dir)
+    if not html_path.exists():
+        log.warning("HTML directory not found: %s", html_path)
+        return []
+
+    html_files = sorted(html_path.rglob("*.html")) + sorted(html_path.rglob("*.htm"))
+    documents: list[dict] = []
+
+    log.info("Found %d HTML files in %s", len(html_files), html_path)
+    for file_path in html_files:
+        pages = parse_html_file(file_path, min_chars=min_html_chars)
+        documents.extend(pages)
+        log.info("Parsed %-55s %4d article records", file_path.name[:55], len(pages))
+
+    return documents
+
+
+def parse_local_documents(
+    pdf_dir: Path | str = PDF_DIR,
+    html_dir: Path | str | None = HTML_DIR,
+    include_html: bool = True,
+    min_page_chars: int = MIN_PAGE_CHARS,
+    min_html_chars: int = MIN_HTML_CHARS,
+) -> list[dict]:
+    """Parse local PDFs and, by default, saved HTML articles."""
+    documents = parse_pdf_documents(pdf_dir, min_page_chars=min_page_chars)
+    if include_html and html_dir is not None:
+        documents.extend(parse_html_documents(html_dir, min_html_chars=min_html_chars))
+    return documents
+
+
 def write_json(documents: list[dict], output_path: Path | str) -> None:
     """Write parsed page records as UTF-8 JSON."""
     Path(output_path).write_text(json.dumps(documents, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -295,10 +399,12 @@ def write_json(documents: list[dict], output_path: Path | str) -> None:
 
 def print_summary(documents: list[dict], output_path: Path | None = None) -> None:
     files = {doc["source_filename"] for doc in documents}
+    sources = Counter(doc["source_type"] for doc in documents)
     categories = Counter(doc["category"] for doc in documents)
-    print("\nParsed local PDF documents")
+    print("\nParsed local documents")
     print(f"  Files processed : {len(files)}")
-    print(f"  Parsed pages    : {len(documents)}")
+    print(f"  Records parsed  : {len(documents)}")
+    print(f"  Source types    : {dict(sources)}")
     print("  Categories      :")
     for category, count in categories.most_common():
         print(f"    {category:<18} {count}")
@@ -307,18 +413,27 @@ def print_summary(documents: list[dict], output_path: Path | None = None) -> Non
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Parse local PDF files for the RAG knowledge base.")
+    parser = argparse.ArgumentParser(description="Parse local PDF and HTML files for the RAG knowledge base.")
     parser.add_argument("--pdf-dir", default=str(PDF_DIR), help="Directory containing local PDF files")
+    parser.add_argument("--html-dir", default=str(HTML_DIR), help="Directory containing saved local HTML files")
+    parser.add_argument("--no-html", action="store_true", help="Only parse PDFs")
     parser.add_argument("--output", default=str(OUTPUT_FILE), help="Where to write parsed JSON")
     parser.add_argument("--min-page-chars", type=int, default=MIN_PAGE_CHARS)
+    parser.add_argument("--min-html-chars", type=int, default=MIN_HTML_CHARS)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s  %(message)s")
 
-    documents = parse_local_documents(args.pdf_dir, min_page_chars=args.min_page_chars)
+    documents = parse_local_documents(
+        args.pdf_dir,
+        html_dir=args.html_dir,
+        include_html=not args.no_html,
+        min_page_chars=args.min_page_chars,
+        min_html_chars=args.min_html_chars,
+    )
     if not documents:
-        log.error("No PDF text parsed from %s", args.pdf_dir)
+        log.error("No local text parsed from %s or %s", args.pdf_dir, args.html_dir)
         return
 
     output_path = Path(args.output)
