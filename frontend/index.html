@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrossBorder Copilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --dhl-red: #D40511;
+    --dhl-yellow: #FFCC00;
+    --dhl-dark: #1A1A1A;
+    --bg: #F5F4F1;
+    --surface: #FFFFFF;
+    --surface-2: #F0EEE9;
+    --border: #E2DFD8;
+    --border-strong: #C8C4BB;
+    --text-primary: #1A1A1A;
+    --text-secondary: #6B6860;
+    --text-muted: #A09D97;
+    --accent: #D40511;
+    --accent-light: #FFF0F1;
+    --yellow-light: #FFFAE6;
+    --success: #1A7A4A;
+    --success-bg: #EDFAF3;
+    --sidebar-w: 280px;
+    --header-h: 56px;
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text-primary);
+    height: 100vh;
+    display: flex;
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── Sidebar ─────────────────────────────────────────────────── */
+  .sidebar {
+    width: var(--sidebar-w);
+    min-width: var(--sidebar-w);
+    background: var(--dhl-dark);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    overflow: hidden;
+  }
+
+  .sidebar-logo {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-mark {
+    width: 32px;
+    height: 32px;
+    background: var(--dhl-red);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .logo-mark svg { width: 18px; height: 18px; }
+
+  .logo-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+  }
+
+  .logo-text strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.01em;
+  }
+
+  .logo-text span {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 400;
+  }
+
+  .sidebar-section {
+    padding: 14px 12px 6px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.3);
+    font-weight: 500;
+  }
+
+  .new-session-btn {
+    margin: 8px 12px;
+    padding: 9px 14px;
+    background: var(--dhl-red);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.15s, transform 0.1s;
+    width: calc(100% - 24px);
+  }
+
+  .new-session-btn:hover { background: #B8040F; }
+  .new-session-btn:active { transform: scale(0.98); }
+
+  .new-session-btn svg { width: 14px; height: 14px; }
+
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+
+  .session-list::-webkit-scrollbar { width: 4px; }
+  .session-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+  .session-item {
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.12s;
+    margin-bottom: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border: 1px solid transparent;
+  }
+
+  .session-item:hover { background: rgba(255,255,255,0.06); }
+  .session-item.active {
+    background: rgba(212,5,17,0.18);
+    border-color: rgba(212,5,17,0.35);
+  }
+
+  .session-item-title {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.85);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .session-item.active .session-item-title { color: #fff; }
+
+  .session-item-meta {
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .session-id-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+    padding: 1px 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+  }
+
+  .sidebar-footer {
+    padding: 12px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .api-config {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+
+  .api-config label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgba(255,255,255,0.3);
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+  }
+
+  .api-config input {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: rgba(255,255,255,0.7);
+    outline: none;
+  }
+
+  .api-config input:focus { border-color: rgba(212,5,17,0.5); }
+  .api-config input::placeholder { color: rgba(255,255,255,0.2); }
+
+  .api-status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #888;
+    flex-shrink: 0;
+  }
+
+  .status-dot.connected { background: #3DD68C; }
+  .status-dot.error { background: var(--dhl-red); }
+
+  /* ── Main area ───────────────────────────────────────────────── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  /* ── Top bar ─────────────────────────────────────────────────── */
+  .topbar {
+    height: var(--header-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+
+  .topbar-title {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .topbar-title h1 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .topbar-title .session-label {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s, border-color 0.12s;
+    color: var(--text-secondary);
+  }
+
+  .icon-btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+  .icon-btn svg { width: 15px; height: 15px; }
+
+  .tool-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--yellow-light);
+    border: 1px solid #E6BE00;
+    border-radius: 20px;
+    padding: 3px 10px 3px 7px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #8A6500;
+  }
+
+  .tool-badge svg { width: 12px; height: 12px; color: #B38900; }
+
+  /* ── Content row ─────────────────────────────────────────────── */
+  .content-row {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ── Chat panel ──────────────────────────────────────────────── */
+  .chat-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 24px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .messages::-webkit-scrollbar { width: 4px; }
+  .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* Empty state */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text-muted);
+    padding: 40px;
+    text-align: center;
+  }
+
+  .empty-icon {
+    width: 48px;
+    height: 48px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .empty-icon svg { width: 22px; height: 22px; color: var(--text-muted); }
+
+  .empty-state h2 {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .empty-state p { font-size: 13px; max-width: 320px; color: var(--text-muted); }
+
+  .quick-prompts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 8px;
+  }
+
+  .quick-prompt {
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 20px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: all 0.12s;
+    color: var(--text-secondary);
+    font-family: var(--font);
+  }
+
+  .quick-prompt:hover {
+    border-color: var(--dhl-red);
+    color: var(--dhl-red);
+    background: var(--accent-light);
+  }
+
+  /* Message bubbles */
+  .msg {
+    display: flex;
+    gap: 10px;
+    max-width: 820px;
+    animation: fadeUp 0.2s ease;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .msg.assistant { align-self: flex-start; }
+
+  .msg-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+
+  .msg.user .msg-avatar {
+    background: var(--dhl-red);
+    color: #fff;
+  }
+
+  .msg.assistant .msg-avatar {
+    background: var(--dhl-dark);
+    color: #fff;
+  }
+
+  .msg-body { display: flex; flex-direction: column; gap: 4px; max-width: calc(100% - 40px); }
+
+  .msg-bubble {
+    padding: 10px 14px;
+    border-radius: var(--radius-lg);
+    font-size: 13.5px;
+    line-height: 1.6;
+    border: 1px solid transparent;
+  }
+
+  .msg.user .msg-bubble {
+    background: var(--dhl-dark);
+    color: #fff;
+    border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+  }
+
+  .msg.assistant .msg-bubble {
+    background: var(--surface);
+    color: var(--text-primary);
+    border-color: var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+  }
+
+  .msg-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 4px;
+  }
+
+  .msg.user .msg-time { text-align: right; }
+
+  .tool-calls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 0 4px;
+  }
+
+  .tool-call-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--yellow-light);
+    border: 1px solid #E6BE00;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #8A6500;
+    font-family: var(--mono);
+  }
+
+  .tool-call-chip svg { width: 10px; height: 10px; }
+
+  /* Typing indicator */
+  .typing-indicator {
+    display: flex;
+    gap: 10px;
+    max-width: 820px;
+    align-self: flex-start;
+  }
+
+  .typing-dots {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+    padding: 12px 16px;
+    display: flex;
+    gap: 5px;
+    align-items: center;
+  }
+
+  .typing-dots span {
+    width: 6px; height: 6px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    animation: bounce 1.2s infinite;
+  }
+
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+
+  /* ── Input area ──────────────────────────────────────────────── */
+  .input-area {
+    padding: 16px 24px 20px;
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+
+  .input-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 10px 12px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .input-box:focus-within {
+    border-color: var(--dhl-red);
+    box-shadow: 0 0 0 3px rgba(212,5,17,0.08);
+  }
+
+  .input-box textarea {
+    flex: 1;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: var(--font);
+    font-size: 13.5px;
+    color: var(--text-primary);
+    background: transparent;
+    line-height: 1.5;
+    max-height: 120px;
+    min-height: 20px;
+  }
+
+  .input-box textarea::placeholder { color: var(--text-muted); }
+
+  .send-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius);
+    background: var(--dhl-red);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, transform 0.1s;
+    flex-shrink: 0;
+  }
+
+  .send-btn:hover { background: #B8040F; }
+  .send-btn:active { transform: scale(0.95); }
+  .send-btn:disabled { background: var(--border); cursor: not-allowed; }
+  .send-btn svg { width: 15px; height: 15px; color: #fff; }
+
+  .input-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 7px;
+    padding: 0 4px;
+  }
+
+  /* ── Right panel (notepad) ───────────────────────────────────── */
+  .right-panel {
+    width: 260px;
+    min-width: 260px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .panel-header h3 {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .panel-header h3 svg { width: 13px; height: 13px; }
+
+  .panel-count {
+    font-size: 11px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1px 7px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .notepad-entries {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .notepad-entries::-webkit-scrollbar { width: 4px; }
+  .notepad-entries::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .notepad-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text-muted);
+    padding: 20px;
+    text-align: center;
+  }
+
+  .notepad-empty svg { width: 24px; height: 24px; color: var(--border-strong); }
+  .notepad-empty p { font-size: 12px; }
+
+  .note-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    animation: fadeUp 0.2s ease;
+  }
+
+  .note-key {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-family: var(--mono);
+  }
+
+  .note-value {
+    font-size: 12.5px;
+    color: var(--text-primary);
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .note-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    font-family: var(--mono);
+  }
+
+  .refresh-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 3px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    transition: color 0.12s;
+  }
+
+  .refresh-btn:hover { color: var(--text-secondary); }
+  .refresh-btn svg { width: 13px; height: 13px; }
+  .refresh-btn.spinning svg { animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Error toast ─────────────────────────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--dhl-dark);
+    color: #fff;
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    z-index: 100;
+    animation: slideIn 0.2s ease;
+    max-width: 360px;
+  }
+
+  .toast.error { border-left: 3px solid var(--dhl-red); }
+  .toast.success { border-left: 3px solid #3DD68C; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ── Scrollbar ───────────────────────────────────────────────── */
+  .no-session-msg {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  .divider-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 4px 0 12px;
+    position: relative;
+  }
+
+  .divider-label::before, .divider-label::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 35%;
+    height: 1px;
+    background: var(--border);
+  }
+  .divider-label::before { left: 0; }
+  .divider-label::after { right: 0; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+        <circle cx="12" cy="10" r="3"/>
+      </svg>
+    </div>
+    <div class="logo-text">
+      <strong>CrossBorder</strong>
+      <span>Copilot</span>
+    </div>
+  </div>
+
+  <div style="padding: 10px 12px 0;">
+    <button class="new-session-btn" onclick="newSession()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+      New conversation
+    </button>
+  </div>
+
+  <div class="sidebar-section">Conversations</div>
+
+  <div class="session-list" id="sessionList">
+    <div style="font-size:12px; color:rgba(255,255,255,0.25); text-align:center; padding:16px 8px; line-height:1.6;">
+      Start a new conversation<br>to get going
+    </div>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="api-config">
+      <label>API Base URL</label>
+      <input type="text" id="apiUrl" value="http://localhost:8000" placeholder="http://localhost:8000" oninput="saveConfig()">
+      <div class="api-status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Not connected</span>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- Main -->
+<div class="main">
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-title">
+      <h1 id="topbarTitle">Select or start a conversation</h1>
+      <span class="session-label" id="topbarSession"></span>
+    </div>
+    <div class="topbar-actions">
+      <div class="tool-badge" id="toolBadge" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+        </svg>
+        notepad active
+      </div>
+      <button class="icon-btn" onclick="pingServer()" title="Test connection">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="content-row">
+    <!-- Chat -->
+    <div class="chat-panel">
+      <div class="messages" id="messages">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+            </svg>
+          </div>
+          <h2>Ask about cross-border shipping</h2>
+          <p>HS codes, customs regulations, duties & taxes, trade agreements, and logistics.</p>
+          <div class="quick-prompts">
+            <button class="quick-prompt" onclick="sendQuick('What HS code covers laptop computers?')">HS code for laptops</button>
+            <button class="quick-prompt" onclick="sendQuick('What are the import duty rates into Canada for electronics?')">Import duties to Canada</button>
+            <button class="quick-prompt" onclick="sendQuick('What documents are required for exporting goods to the EU?')">EU export documents</button>
+            <button class="quick-prompt" onclick="sendQuick('Explain Incoterms DDP vs DAP for international shipments')">DDP vs DAP Incoterms</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <div class="input-box">
+          <textarea
+            id="chatInput"
+            placeholder="Ask about HS codes, customs, duties, trade agreements…"
+            rows="1"
+            onkeydown="handleKey(event)"
+            oninput="autoResize(this)"
+          ></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint">Press <kbd style="background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:10px;">Enter</kbd> to send, <kbd style="background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:10px;">Shift+Enter</kbd> for new line</div>
+      </div>
+    </div>
+
+    <!-- Notepad panel -->
+    <div class="right-panel">
+      <div class="panel-header">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          Notepad
+        </h3>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="panel-count" id="noteCount">0</span>
+          <button class="refresh-btn" id="refreshBtn" onclick="loadNotepad()" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <polyline points="1 4 1 10 7 10"/>
+              <path d="M3.51 15a9 9 0 102.13-9.36L1 10"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="notepad-entries" id="notepadEntries">
+        <div class="notepad-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          <p>The agent will save key info here as you chat</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let sessions = JSON.parse(localStorage.getItem('cbc_sessions') || '[]');
+  let activeSessionId = null;
+  let isLoading = false;
+
+  function getApiUrl() {
+    return document.getElementById('apiUrl').value.trim().replace(/\/$/, '');
+  }
+
+  function saveConfig() {
+    localStorage.setItem('cbc_api_url', getApiUrl());
+  }
+
+  function loadConfig() {
+    const saved = localStorage.getItem('cbc_api_url');
+    if (saved) document.getElementById('apiUrl').value = saved;
+  }
+
+  async function pingServer() {
+    const dot = document.getElementById('statusDot');
+    const txt = document.getElementById('statusText');
+    dot.className = 'status-dot';
+    txt.textContent = 'Checking…';
+    try {
+      const r = await fetch(getApiUrl() + '/', { signal: AbortSignal.timeout(4000) });
+      if (r.ok) {
+        dot.className = 'status-dot connected';
+        txt.textContent = 'Connected';
+        showToast('Connected to API', 'success');
+      } else {
+        throw new Error('Non-OK');
+      }
+    } catch {
+      dot.className = 'status-dot error';
+      txt.textContent = 'Unreachable';
+      showToast('Cannot reach API at ' + getApiUrl(), 'error');
+    }
+  }
+
+  function newSession() {
+    const id = crypto.randomUUID();
+    const session = { id, title: 'New conversation', createdAt: new Date().toISOString(), msgCount: 0 };
+    sessions.unshift(session);
+    saveSessions();
+    renderSessionList();
+    activateSession(id, true);
+  }
+
+  function activateSession(id, fresh = false) {
+    activeSessionId = id;
+    const session = sessions.find(s => s.id === id);
+    document.getElementById('topbarTitle').textContent = session ? session.title : 'Conversation';
+    document.getElementById('topbarSession').textContent = id;
+    document.getElementById('toolBadge').style.display = 'none';
+    renderSessionList();
+    if (fresh) {
+      clearMessages();
+    } else {
+      loadHistory();
+    }
+    loadNotepad();
+  }
+
+  function clearMessages() {
+    const msgs = document.getElementById('messages');
+    msgs.innerHTML = `
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+          </svg>
+        </div>
+        <h2>Ask about cross-border shipping</h2>
+        <p>HS codes, customs regulations, duties & taxes, trade agreements, and logistics.</p>
+        <div class="quick-prompts">
+          <button class="quick-prompt" onclick="sendQuick('What HS code covers laptop computers?')">HS code for laptops</button>
+          <button class="quick-prompt" onclick="sendQuick('What are the import duty rates into Canada for electronics?')">Import duties to Canada</button>
+          <button class="quick-prompt" onclick="sendQuick('What documents are required for exporting goods to the EU?')">EU export documents</button>
+          <button class="quick-prompt" onclick="sendQuick('Explain Incoterms DDP vs DAP for international shipments')">DDP vs DAP Incoterms</button>
+        </div>
+      </div>`;
+  }
+
+  function saveSessions() {
+    localStorage.setItem('cbc_sessions', JSON.stringify(sessions.slice(0, 50)));
+  }
+
+  function renderSessionList() {
+    const list = document.getElementById('sessionList');
+    if (sessions.length === 0) {
+      list.innerHTML = `<div style="font-size:12px; color:rgba(255,255,255,0.25); text-align:center; padding:16px 8px; line-height:1.6;">Start a new conversation<br>to get going</div>`;
+      return;
+    }
+    list.innerHTML = sessions.map(s => `
+      <div class="session-item ${s.id === activeSessionId ? 'active' : ''}" onclick="activateSession('${s.id}')">
+        <div class="session-item-title">${escHtml(s.title)}</div>
+        <div class="session-item-meta">
+          <span class="session-id-badge">${s.id.slice(0,8)}…</span>
+          <span>${s.msgCount || 0} msg${s.msgCount !== 1 ? 's' : ''}</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function loadHistory() {
+    if (!activeSessionId) return;
+    const msgs = document.getElementById('messages');
+    msgs.innerHTML = '';
+    try {
+      const r = await fetch(`${getApiUrl()}/chat/history/${activeSessionId}`);
+      if (!r.ok) { clearMessages(); return; }
+      const data = await r.json();
+      const filtered = (data.messages || []).filter(m => m.role !== 'system');
+      if (filtered.length === 0) { clearMessages(); return; }
+      filtered.forEach(m => appendMessage(m.role === 'user' ? 'user' : 'assistant', m.content, []));
+    } catch {
+      clearMessages();
+    }
+  }
+
+  function appendMessage(role, text, toolCalls = []) {
+    const msgs = document.getElementById('messages');
+    const emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.remove();
+
+    const initials = role === 'user' ? 'U' : 'CB';
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const toolChips = (toolCalls || []).map(t => `
+      <div class="tool-call-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+        </svg>
+        ${escHtml(t)}
+      </div>`).join('');
+
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.innerHTML = `
+      <div class="msg-avatar">${initials}</div>
+      <div class="msg-body">
+        <div class="msg-bubble">${formatText(text)}</div>
+        ${toolChips ? `<div class="tool-calls">${toolChips}</div>` : ''}
+        <div class="msg-time">${time}</div>
+      </div>`;
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function showTyping() {
+    const msgs = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = 'typing-indicator';
+    div.id = 'typingIndicator';
+    div.innerHTML = `
+      <div class="msg-avatar" style="width:28px;height:28px;border-radius:50%;background:var(--dhl-dark);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;margin-top:2px;">CB</div>
+      <div class="typing-dots"><span></span><span></span><span></span></div>`;
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function removeTyping() {
+    const el = document.getElementById('typingIndicator');
+    if (el) el.remove();
+  }
+
+  async function sendMessage() {
+    if (isLoading) return;
+    const input = document.getElementById('chatInput');
+    const query = input.value.trim();
+    if (!query) return;
+    if (!activeSessionId) { newSession(); }
+
+    input.value = '';
+    autoResize(input);
+    appendMessage('user', query);
+    isLoading = true;
+    document.getElementById('sendBtn').disabled = true;
+    showTyping();
+
+    try {
+      const body = { query };
+      if (activeSessionId) body.session_id = activeSessionId;
+
+      const r = await fetch(`${getApiUrl()}/chat/invoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      removeTyping();
+
+      if (!r.ok) {
+        const err = await r.text();
+        showToast('Error: ' + err, 'error');
+        return;
+      }
+
+      const data = await r.json();
+
+      if (data.session_id && data.session_id !== activeSessionId) {
+        activeSessionId = data.session_id;
+      }
+
+      appendMessage('assistant', data.response, data.tool_calls_made);
+
+      if (data.tool_calls_made && data.tool_calls_made.length > 0) {
+        document.getElementById('toolBadge').style.display = 'flex';
+        loadNotepad();
+      }
+
+      const session = sessions.find(s => s.id === activeSessionId);
+      if (session) {
+        session.msgCount = (session.msgCount || 0) + 2;
+        if (session.title === 'New conversation') {
+          session.title = query.length > 42 ? query.slice(0, 42) + '…' : query;
+        }
+        saveSessions();
+        renderSessionList();
+        document.getElementById('topbarTitle').textContent = session.title;
+      }
+
+    } catch (e) {
+      removeTyping();
+      showToast('Failed to reach API. Is the server running?', 'error');
+    } finally {
+      isLoading = false;
+      document.getElementById('sendBtn').disabled = false;
+    }
+  }
+
+  async function loadNotepad() {
+    if (!activeSessionId) return;
+    const btn = document.getElementById('refreshBtn');
+    btn.classList.add('spinning');
+    try {
+      const r = await fetch(`${getApiUrl()}/notepad/${activeSessionId}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      renderNotepad(data.notes || []);
+    } catch {
+    } finally {
+      btn.classList.remove('spinning');
+    }
+  }
+
+  function renderNotepad(notes) {
+    const container = document.getElementById('notepadEntries');
+    document.getElementById('noteCount').textContent = notes.length;
+    if (notes.length === 0) {
+      container.innerHTML = `
+        <div class="notepad-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          <p>The agent will save key info here as you chat</p>
+        </div>`;
+      return;
+    }
+    container.innerHTML = notes.map(n => `
+      <div class="note-card">
+        <div class="note-key">${escHtml(n.key)}</div>
+        <div class="note-value">${escHtml(n.value)}</div>
+        <div class="note-time">${n.updated_at ? n.updated_at.slice(0,16).replace('T', ' ') : ''}</div>
+      </div>`).join('');
+  }
+
+  function sendQuick(text) {
+    document.getElementById('chatInput').value = text;
+    sendMessage();
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  function escHtml(s) {
+    return String(s || '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+
+  function formatText(text) {
+    return escHtml(text)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code style="font-family:var(--mono);font-size:12px;background:var(--surface-2);padding:1px 5px;border-radius:3px;">$1</code>')
+      .replace(/\n/g, '<br>');
+  }
+
+  function showToast(msg, type = 'error') {
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+  }
+
+  loadConfig();
+  renderSessionList();
+  pingServer();
+</script>
+</body>
+</html>

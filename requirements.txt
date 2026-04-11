@@ -12,3 +12,13 @@ langchain-text-splitters>=0.0.1
 # Embeddings + vector store
 chromadb>=0.5
 sentence-transformers>=2.7   # provides all-MiniLM-L6-v2 locally
+
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+sqlmodel>=0.0.18
+langchain-core>=0.2.0
+langchain-openai>=0.1.0
+langgraph>=0.1.0
+# Optional — only needed if MCP_SERVER_URLS is set
+langchain-mcp-adapters>=0.1.0
