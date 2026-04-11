@@ -8,6 +8,10 @@ Run with: python shipment_inquiry_mcp.py
 import json
 import logging
 import sqlite3
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -23,7 +27,8 @@ logger = logging.getLogger("shipment-inquiry")
 
 # ── Database setup ────────────────────────────────────────────────────────────
 DB_FILE = Path(__file__).parent / "shipments.db"
-
+BASE_URL = os.getenv("LLM_BASE_URL")
+API_KEY  = os.getenv("LLM_API_KEY")
 
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE)
@@ -67,8 +72,8 @@ def init_db() -> None:
 # ── LLM ───────────────────────────────────────────────────────────────────────
 logger.info("Initialising LLM client...")
 llm = ChatOpenAI(
-    base_url="https://rsm-8430-finalproject.bjlkeng.io/v1",
-    api_key="1012837405",
+    base_url=BASE_URL,
+    api_key=API_KEY,
     temperature=0.0,
 )
 logger.info("LLM client ready.")

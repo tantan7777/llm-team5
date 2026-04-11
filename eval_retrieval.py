@@ -1,293 +1,177 @@
 """
-eval_retrieval.py  —  CrossBorder Copilot
-Evaluates RAG retrieval quality across 15 representative test cases.
+Simple retrieval-quality evaluation for the CrossBorder Copilot RAG layer.
 
-Measures:
-  - Retrieval accuracy: did the top-5 results contain a relevant chunk?
-  - Confidence distribution: how often do we get high/medium/low/none
-  - Citation quality: are the cited doc_types correct for the query?
-  - Failure analysis: which queries fail and why?
+Each case specifies expected source filename fragments and/or expected keywords.
+A query is a hit when any top-k chunk matches at least one expected source or
+contains at least one expected keyword.
 
 Usage:
-    python eval_retrieval.py                  # run all test cases
-    python eval_retrieval.py --verbose        # show full context for each case
-    python eval_retrieval.py --export results.json  # save results to file
+    python eval_retrieval.py
+    python eval_retrieval.py --k 10 --verbose
 """
 
 from __future__ import annotations
-import sys
-import json
-import logging
+
 import argparse
+import json
+from typing import Any
+
 from retriever import Retriever
 
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s  %(message)s")
 
-
-# ── Test Cases ────────────────────────────────────────────────────────────────
-# Each test case has:
-#   query            : the user's question
-#   expected_types   : which doc_types SHOULD appear in results (at least one match = pass)
-#   expected_keywords: keywords that SHOULD appear in retrieved text (at least one match = pass)
-#   category         : what this test is evaluating
-
-TEST_CASES = [
-    # ── Successful knowledge retrieval (7 cases) ──────────────────────────────
+GOLD_CASES: list[dict[str, Any]] = [
     {
-        "id": 1,
+        "query": "Which items are prohibited or restricted for international shipping?",
+        "expected_sources": ["Restricted-and-prohibited-items", "prohibited", "restriction"],
+        "expected_keywords": ["prohibited", "restricted", "dangerous goods"],
+    },
+    {
         "query": "What documents are needed for customs clearance?",
-        "expected_types": ["customs"],
-        "expected_keywords": ["commercial invoice", "customs", "clearance", "declaration"],
-        "category": "knowledge_retrieval",
+        "expected_sources": ["Customs_Checklist", "customs", "commercial_invoice"],
+        "expected_keywords": ["customs", "commercial invoice", "clearance"],
     },
     {
-        "id": 2,
-        "query": "Which items are prohibited for international shipping with DHL?",
-        "expected_types": ["policy"],
-        "expected_keywords": ["prohibited", "restricted", "dangerous", "items"],
-        "category": "knowledge_retrieval",
+        "query": "How do I prepare a commercial invoice for an international shipment?",
+        "expected_sources": ["commercial_invoice", "Customs_Checklist"],
+        "expected_keywords": ["commercial invoice", "description", "value", "origin"],
     },
     {
-        "id": 3,
-        "query": "How do I prepare a commercial invoice for shipping to the UK?",
-        "expected_types": ["customs", "guide"],
-        "expected_keywords": ["commercial invoice", "value", "description", "origin"],
-        "category": "knowledge_retrieval",
-    },
-    {
-        "id": 4,
-        "query": "What are DHL's surcharges for peak season shipping?",
-        "expected_types": ["surcharge"],
-        "expected_keywords": ["surcharge", "peak", "fee"],
-        "category": "knowledge_retrieval",
-    },
-    {
-        "id": 5,
-        "query": "Can I ship lithium batteries internationally with DHL?",
-        "expected_types": ["policy", "guide"],
+        "query": "Can DHL ship lithium batteries or dangerous goods?",
+        "expected_sources": ["battery", "dangerous", "Restricted-and-prohibited-items"],
         "expected_keywords": ["battery", "lithium", "dangerous goods"],
-        "category": "knowledge_retrieval",
     },
     {
-        "id": 6,
-        "query": "What happens to undeliverable shipments in Canada?",
-        "expected_types": ["policy", "guide", "faq"],
-        "expected_keywords": ["undeliverable", "return", "shipment"],
-        "category": "knowledge_retrieval",
+        "query": "What peak season or fuel surcharges might apply?",
+        "expected_sources": ["surcharge", "Surcharges", "peak"],
+        "expected_keywords": ["surcharge", "peak", "fuel"],
     },
     {
-        "id": 7,
-        "query": "How does DHL eCommerce parcel tracking work?",
-        "expected_types": ["faq", "guide"],
-        "expected_keywords": ["tracking", "status", "shipment"],
-        "category": "knowledge_retrieval",
-    },
-
-    # ── Doc-type filtered retrieval (2 cases) ─────────────────────────────────
-    {
-        "id": 8,
-        "query": "What is the duty and tax prepayment option?",
-        "expected_types": ["surcharge", "faq", "guide"],
-        "expected_keywords": ["duty", "tax", "prepayment", "DDP"],
-        "category": "filtered_retrieval",
+        "query": "What does duty and tax prepayment mean for DHL eCommerce shipments?",
+        "expected_sources": ["duty-and-tax-prepayment"],
+        "expected_keywords": ["duty", "tax", "prepayment"],
     },
     {
-        "id": 9,
-        "query": "What are the terms and conditions for DHL eCommerce in Canada?",
-        "expected_types": ["guide", "policy"],
-        "expected_keywords": ["terms", "conditions", "Canada", "liability"],
-        "category": "filtered_retrieval",
-    },
-
-    # ── Edge cases and harder queries (3 cases) ───────────────────────────────
-    {
-        "id": 10,
-        "query": "I want to ship skincare products from Canada to the UK, what paperwork do I need?",
-        "expected_types": ["customs", "guide"],
-        "expected_keywords": ["customs", "invoice", "clearance", "documents"],
-        "category": "complex_query",
+        "query": "What guidance exists for shipment value protection?",
+        "expected_sources": ["shipment-protection", "limitation-of-liability"],
+        "expected_keywords": ["shipment protection", "liability", "value"],
     },
     {
-        "id": 11,
-        "query": "My shipment is stuck in customs, what should I do?",
-        "expected_types": ["customs", "faq", "guide"],
-        "expected_keywords": ["customs", "clearance", "delay", "hold"],
-        "category": "complex_query",
+        "query": "What happens when a shipment cannot be delivered or needs return handling?",
+        "expected_sources": ["undeliverable", "terms-and-conditions", "return"],
+        "expected_keywords": ["undeliverable", "return", "delivery"],
     },
     {
-        "id": 12,
-        "query": "How much does it cost to ship a 5kg package from China to the US?",
-        "expected_types": ["guide", "surcharge"],
-        "expected_keywords": ["price", "rate", "cost", "weight", "parcel"],
-        "category": "complex_query",
-    },
-
-    # ── Out-of-scope / no-answer queries (3 cases) ────────────────────────────
-    {
-        "id": 13,
-        "query": "What is the weather forecast in Toronto this weekend?",
-        "expected_types": [],
-        "expected_keywords": [],
-        "category": "out_of_scope",
+        "query": "What are common causes of customs delays or clearance issues?",
+        "expected_sources": ["customs", "clearance", "Customs-Industry-Guide"],
+        "expected_keywords": ["customs", "clearance", "delay"],
     },
     {
-        "id": 14,
-        "query": "Can you help me write a Python script to sort a list?",
-        "expected_types": [],
-        "expected_keywords": [],
-        "category": "out_of_scope",
-    },
-    {
-        "id": 15,
-        "query": "What is the capital of France?",
-        "expected_types": [],
-        "expected_keywords": [],
-        "category": "out_of_scope",
+        "query": "What DHL eCommerce services exist for parcels shipped from Canada to the US?",
+        "expected_sources": ["Canada_to_U.S", "parcel-international-direct", "ca-parcel"],
+        "expected_keywords": ["parcel", "international", "direct", "canada"],
     },
 ]
 
 
-# ── Evaluation Logic ──────────────────────────────────────────────────────────
+def text_matches_keywords(text: str, keywords: list[str]) -> list[str]:
+    haystack = text.lower()
+    return [keyword for keyword in keywords if keyword.lower() in haystack]
 
-def evaluate_case(retriever: Retriever, case: dict, verbose: bool = False) -> dict:
-    """Run a single test case and score it."""
-    result = retriever.retrieve(case["query"])
 
-    # Check doc_type match
-    retrieved_types = {r["doc_type"] for r in result["results"]}
-    type_match = bool(set(case["expected_types"]) & retrieved_types) if case["expected_types"] else True
+def source_matches(filename: str, expected_sources: list[str]) -> list[str]:
+    lower = filename.lower()
+    return [source for source in expected_sources if source.lower() in lower]
 
-    # Check keyword match
-    all_text = " ".join(r["text"].lower() for r in result["results"])
-    keyword_hits = [kw for kw in case["expected_keywords"] if kw.lower() in all_text]
-    keyword_match = len(keyword_hits) > 0 if case["expected_keywords"] else True
 
-    # For out-of-scope queries, success = low confidence or no results
-    if case["category"] == "out_of_scope":
-        is_pass = result["confidence"] in ("none", "low")
-    else:
-        is_pass = type_match and keyword_match and result["found"]
+def evaluate_case(retriever: Retriever, case: dict[str, Any], k: int) -> dict[str, Any]:
+    result = retriever.retrieve(case["query"], k=k)
+    retrieved_sources = [item["source_filename"] for item in result["results"]]
+    combined_text = " ".join(
+        f"{item['source_filename']} {item['title']} {item['category']} {item['text']}"
+        for item in result["results"]
+    )
 
-    scores = [r["score"] for r in result["results"]]
+    keyword_hits = text_matches_keywords(combined_text, case["expected_keywords"])
+    source_hits: list[str] = []
+    for filename in retrieved_sources:
+        source_hits.extend(source_matches(filename, case["expected_sources"]))
 
-    eval_result = {
-        "id":              case["id"],
-        "query":           case["query"],
-        "category":        case["category"],
-        "passed":          is_pass,
-        "confidence":      result["confidence"],
-        "found":           result["found"],
-        "num_results":     len(result["results"]),
-        "top_score":       scores[0] if scores else 0.0,
-        "avg_score":       round(sum(scores) / len(scores), 4) if scores else 0.0,
-        "type_match":      type_match,
-        "keyword_match":   keyword_match,
-        "keyword_hits":    keyword_hits,
-        "retrieved_types": list(retrieved_types),
-        "expected_types":  case["expected_types"],
+    hit = bool(keyword_hits or source_hits)
+    return {
+        "query": case["query"],
+        "hit": hit,
+        "confidence": result["confidence"],
+        "top_score": result["results"][0]["score"] if result["results"] else 0.0,
+        "retrieved_sources": retrieved_sources,
+        "keyword_hits": sorted(set(keyword_hits)),
+        "source_hits": sorted(set(source_hits)),
     }
 
-    if verbose:
-        eval_result["citations"] = result["citations"]
 
-    return eval_result
+def run_evaluation(
+    k: int = 5,
+    verbose: bool = False,
+    export_path: str | None = None,
+    chroma_dir: str | None = None,
+    collection_name: str | None = None,
+    embedding_model: str | None = None,
+    local_files_only: bool = False,
+) -> list[dict[str, Any]]:
+    kwargs = {}
+    if chroma_dir:
+        kwargs["chroma_dir"] = chroma_dir
+    if collection_name:
+        kwargs["collection_name"] = collection_name
+    if embedding_model:
+        kwargs["embedding_model"] = embedding_model
+    kwargs["local_files_only"] = local_files_only
+    retriever = Retriever(**kwargs)
+    results = [evaluate_case(retriever, case, k=k) for case in GOLD_CASES]
 
+    print(f"\nRetrieval evaluation, hit@{k}")
+    print("=" * 80)
+    for index, result in enumerate(results, start=1):
+        status = "HIT" if result["hit"] else "MISS"
+        retrieved = ", ".join(result["retrieved_sources"][:3])
+        print(f"{index:02d}. {status:<4} score={result['top_score']:.3f} conf={result['confidence']:<6} {result['query']}")
+        print(f"    sources: {retrieved}")
+        if verbose:
+            print(f"    source hits : {result['source_hits']}")
+            print(f"    keyword hits: {result['keyword_hits']}")
 
-def run_evaluation(verbose: bool = False, export_path: str | None = None):
-    """Run all test cases and print a summary report."""
-    retriever = Retriever()
-    results = []
+    hits = sum(1 for result in results if result["hit"])
+    hit_rate = hits / len(results) if results else 0.0
+    print("=" * 80)
+    print(f"Overall hit@{k}: {hits}/{len(results)} = {hit_rate:.1%}")
 
-    print("=" * 70)
-    print("  CrossBorder Copilot — Retrieval Evaluation")
-    print("=" * 70)
-
-    for case in TEST_CASES:
-        eval_result = evaluate_case(retriever, case, verbose)
-        results.append(eval_result)
-
-        status = "PASS" if eval_result["passed"] else "FAIL"
-        icon = "✓" if eval_result["passed"] else "✗"
-        print(
-            f"  {icon} [{status}]  #{eval_result['id']:02d}  "
-            f"conf={eval_result['confidence']:<6}  "
-            f"score={eval_result['top_score']:.3f}  "
-            f"type={'✓' if eval_result['type_match'] else '✗'}  "
-            f"kw={'✓' if eval_result['keyword_match'] else '✗'}  "
-            f"| {eval_result['query'][:55]}"
-        )
-
-        if verbose and eval_result["citations"]:
-            for c in eval_result["citations"][:3]:
-                print(f"        → [{c['doc_type']}] {c['title'][:50]}")
-
-    # ── Summary ───────────────────────────────────────────────────────────────
-    total = len(results)
-    passed = sum(1 for r in results if r["passed"])
-    failed_cases = [r for r in results if not r["passed"]]
-
-    print("\n" + "=" * 70)
-    print("  SUMMARY")
-    print("=" * 70)
-    print(f"  Total: {total}  |  Passed: {passed}  |  Failed: {total - passed}")
-    print(f"  Overall accuracy: {passed / total * 100:.1f}%")
-
-    # By category
-    from collections import Counter
-    categories = Counter(r["category"] for r in results)
-    print("\n  By category:")
-    for cat in sorted(categories.keys()):
-        cat_results = [r for r in results if r["category"] == cat]
-        cat_passed = sum(1 for r in cat_results if r["passed"])
-        print(f"    {cat:<22} {cat_passed}/{len(cat_results)} passed")
-
-    # Confidence distribution
-    conf_dist = Counter(r["confidence"] for r in results)
-    print("\n  Confidence distribution:")
-    for level in ["high", "medium", "low", "none"]:
-        print(f"    {level:<8} {conf_dist.get(level, 0)}")
-
-    # Average scores
-    retrieval_results = [r for r in results if r["category"] != "out_of_scope"]
-    if retrieval_results:
-        avg_top = sum(r["top_score"] for r in retrieval_results) / len(retrieval_results)
-        print(f"\n  Avg top-1 score (in-scope queries): {avg_top:.3f}")
-
-    # Failure analysis
-    if failed_cases:
-        print("\n  FAILURE ANALYSIS:")
-        for r in failed_cases:
-            print(f"    #{r['id']:02d} [{r['category']}] conf={r['confidence']}")
-            print(f"        Query: {r['query'][:60]}")
-            print(f"        Expected types: {r['expected_types']}")
-            print(f"        Retrieved types: {r['retrieved_types']}")
-            print(f"        Keyword hits: {r['keyword_hits']}")
-            print(f"        Top score: {r['top_score']:.3f}")
-            print()
-
-    print("=" * 70)
-
-    # Export
     if export_path:
-        export_data = {
-            "summary": {
-                "total": total,
-                "passed": passed,
-                "failed": total - passed,
-                "accuracy": round(passed / total * 100, 1),
-            },
-            "results": results,
-        }
-        with open(export_path, "w") as f:
-            json.dump(export_data, f, indent=2, default=str)
-        print(f"\n  Results exported to {export_path}")
+        with open(export_path, "w", encoding="utf-8") as handle:
+            json.dump({"k": k, "hit_rate": hit_rate, "results": results}, handle, indent=2)
+        print(f"Exported results to {export_path}")
+
+    return results
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Evaluate local DHL retrieval quality.")
+    parser.add_argument("--k", type=int, default=5, help="Top-k retrieval cutoff")
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--export", default=None, help="Optional JSON export path")
+    parser.add_argument("--chroma-dir", default=None)
+    parser.add_argument("--collection", default=None)
+    parser.add_argument("--embedding-model", default=None)
+    parser.add_argument("--local-files-only", action="store_true")
+    args = parser.parse_args()
+    run_evaluation(
+        k=args.k,
+        verbose=args.verbose,
+        export_path=args.export,
+        chroma_dir=args.chroma_dir,
+        collection_name=args.collection,
+        embedding_model=args.embedding_model,
+        local_files_only=args.local_files_only,
+    )
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--verbose", action="store_true", help="Show citations for each case")
-    parser.add_argument("--export", type=str, default=None, help="Export results to JSON file")
-    args = parser.parse_args()
-    run_evaluation(verbose=args.verbose, export_path=args.export)
+    main()
