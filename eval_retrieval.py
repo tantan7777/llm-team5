@@ -266,6 +266,7 @@ def run_evaluation(verbose: bool = False, export_path: str | None = None):
             print()
 
     print("=" * 70)
+    return results
 
     # Export
     if export_path:
@@ -281,7 +282,7 @@ def run_evaluation(verbose: bool = False, export_path: str | None = None):
         with open(export_path, "w") as f:
             json.dump(export_data, f, indent=2, default=str)
         print(f"\n  Results exported to {export_path}")
-
+        return results
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
