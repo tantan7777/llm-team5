@@ -7,3 +7,4 @@ venv/
 mcp/files/
 *.db
 __pycache__/
+skills/

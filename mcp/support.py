@@ -17,6 +17,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+BASE_URL = os.getenv("LLM_BASE_URL")
+API_KEY  = os.getenv("LLM_API_KEY")
+
 # ── Logging setup ─────────────────────────────────────────────────────────────
 
 RESET  = "\033[0m"
@@ -81,8 +84,9 @@ def _kv(key: str, value: str, color: str = CYAN):
 _banner()
 _section("STARTUP")
 
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Session, SQLModel, create_engine
 from fastmcp import FastMCP
+from langchain_openai import ChatOpenAI
 
 logger.info(f"{GREEN}✔{RESET}  Core imports OK")
 
@@ -110,6 +114,57 @@ class SupportTicket(SQLModel, table=True):
 engine = create_engine(DB_URL, echo=False)
 SQLModel.metadata.create_all(engine)
 logger.info(f"{GREEN}✔{RESET}  SQLite database initialised  →  tickets.db")
+
+# ── LLM setup ─────────────────────────────────────────────────────────────────
+
+_kv("LLM base URL", BASE_URL or "(not set)", YELLOW if not BASE_URL else CYAN)
+_kv("LLM API key",  "***" + (API_KEY[-4:] if API_KEY else "(not set)"))
+
+_llm_ready = bool(BASE_URL and API_KEY)
+if _llm_ready:
+    llm = ChatOpenAI(
+        base_url=BASE_URL,
+        api_key=API_KEY,
+        temperature=0.0,
+    )
+    logger.info(f"{GREEN}✔{RESET}  LLM client initialised")
+else:
+    logger.warning(
+        f"{YELLOW}⚠{RESET}  LLM_BASE_URL or LLM_API_KEY not set — "
+        f"falling back to truncated issue summary for SMS"
+    )
+
+SMS_SUMMARY_SYSTEM_PROMPT = """You summarize shipment support issues for SMS alerts.
+Return exactly one concise line.
+Do not use bullets, labels, quotes, or extra commentary.
+Keep the summary under 12 words if possible.
+Extract only the core issue keywords so the alert is easy to scan.
+"""
+
+def summarize_issue_for_sms(issue_summary: str) -> str:
+    """Return a short one-line summary suitable for a Twilio SMS body."""
+    if not _llm_ready:
+        fallback = issue_summary.strip().replace("\n", " ")
+        return fallback[:60]
+
+    prompt = f"""Summarize this support escalation issue into a short SMS-safe issue line:
+
+Issue:
+{issue_summary}
+
+Return only the concise issue line."""
+    try:
+        response = llm.invoke([
+            {"role": "system", "content": SMS_SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ])
+        concise = str(response.content).strip().replace("\n", " ")
+        return concise[:60] if concise else issue_summary.strip().replace("\n", " ")[:60]
+    except Exception as exc:
+        logger.warning(
+            f"{YELLOW}⚠{RESET}  LLM issue summarization failed — using fallback. Error: {exc}"
+        )
+        return issue_summary.strip().replace("\n", " ")[:60]
 
 # ── Twilio config ─────────────────────────────────────────────────────────────
 
@@ -170,7 +225,7 @@ def create_escalation_ticket(
     )
 
     # ── Step 1: Persist to SQLite ─────────────────────────────────────────────
-    logger.info(f"{BLUE}[1/3]{RESET}  Persisting ticket to SQLite…")
+    logger.info(f"{BLUE}[1/4]{RESET}  Persisting ticket to SQLite…")
 
     ticket = SupportTicket(
         customer_name=customer_name,
@@ -190,10 +245,15 @@ def create_escalation_ticket(
         f"created_at={ticket.created_at}{RESET}"
     )
 
-    # ── Step 2: Twilio SMS alert ──────────────────────────────────────────────
-    logger.info(f"{BLUE}[2/3]{RESET}  Preparing Twilio SMS alert…")
+    # ── Step 2: Summarize issue for SMS ───────────────────────────────────────
+    logger.info(f"{BLUE}[2/4]{RESET}  Generating concise issue summary for SMS…")
+    concise_issue = summarize_issue_for_sms(issue_summary)
+    _kv("SMS issue line", concise_issue, WHITE)
 
-    sms_body = f"🚨 Ticket #{ticket_id} | {customer_name} | {priority.upper()} | {issue_summary[:60]}"
+    # ── Step 3: Twilio SMS alert ──────────────────────────────────────────────
+    logger.info(f"{BLUE}[3/4]{RESET}  Preparing Twilio SMS alert…")
+
+    sms_body = f"🚨 Ticket #{ticket_id} | {customer_name} | {priority.upper()} | {concise_issue}"
 
     if _twilio_ready:
         logger.info(
@@ -224,16 +284,17 @@ def create_escalation_ticket(
         )
         sms_status = "SMS alert skipped (Twilio not configured)."
 
-    # ── Step 3: Build response ────────────────────────────────────────────────
-    logger.info(f"{BLUE}[3/3]{RESET}  Building response for main agent…")
+    # ── Step 4: Build response ────────────────────────────────────────────────
+    logger.info(f"{BLUE}[4/4]{RESET}  Building response for main agent…")
 
     response = (
         f"Escalation ticket created successfully.\n"
-        f"  Ticket ID : #{ticket_id}\n"
-        f"  Customer  : {customer_name}\n"
-        f"  Priority  : {priority}\n"
-        f"  Status    : Open\n"
-        f"  Created   : {ticket.created_at}\n"
+        f"  Ticket ID        : #{ticket_id}\n"
+        f"  Customer         : {customer_name}\n"
+        f"  Priority         : {priority}\n"
+        f"  Status           : Open\n"
+        f"  Created          : {ticket.created_at}\n"
+        f"  SMS issue line   : {concise_issue}\n"
         f"  {sms_status}"
     )
 
@@ -241,7 +302,7 @@ def create_escalation_ticket(
         f"\n  {BOLD}{GREEN}✔  Ticket #{ticket_id} live — response dispatched to main agent{RESET}\n"
     )
     logger.info(
-        f"  {DIM}{GRAY}Response preview → {response[:80].replace(chr(10), ' ')}…{RESET}\n"
+        f"  {DIM}{GRAY}Response preview → {response[:100].replace(chr(10), ' ')}…{RESET}\n"
     )
 
     return response
