@@ -14,7 +14,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.core.config import DB_PATH, MCP_SERVER_URLS
 from app.core.agent import build_agent
 from app.db.database import init_db
-from app.api import chat, notepad as notepad_router
+from app.api import chat, notepad as notepad_router, evaluation
 
 logger = logging.getLogger("crossborder-copilot")
 
@@ -65,6 +65,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.include_router(chat.router)
     app.include_router(notepad_router.router)
+    app.include_router(evaluation.router)
 
     @app.get("/", tags=["Health"])
     async def root():

@@ -21,7 +21,8 @@ from typing import Any
 import chromadb
 from chromadb.api.models.Collection import Collection
 
-from ingest import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, make_embedding_function
+from chromadb.utils import embedding_functions
+from ingest import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL
 
 
 DEFAULT_TOP_K = 5
@@ -30,6 +31,11 @@ CONFIDENCE_MEDIUM = 0.30
 
 log = logging.getLogger(__name__)
 
+def make_embedding_function(model_name: str, local_files_only: bool = False):
+    kwargs = {"model_name": model_name}
+    if local_files_only:
+        kwargs["model_kwargs"] = {"local_files_only": True}
+    return embedding_functions.SentenceTransformerEmbeddingFunction(**kwargs)
 
 SYSTEM_PROMPT = """You are CrossBorder Copilot, a support assistant for cross-border ecommerce shipping.
 Answer only from the retrieved DHL-related context. If the context is insufficient, say that the knowledge base does not contain enough information and recommend contacting DHL support. Cite sources using the provided source labels."""
@@ -54,13 +60,7 @@ class Retriever:
     def _load_collection(self) -> Collection:
         client = chromadb.PersistentClient(path=self.chroma_dir)
         try:
-            return client.get_collection(
-                name=self.collection_name,
-                embedding_function=make_embedding_function(
-                    self.embedding_model,
-                    local_files_only=self.local_files_only,
-                ),
-            )
+            return client.get_collection(name=COLLECTION_NAME)
         except Exception as exc:
             raise RuntimeError(
                 f"Could not open Chroma collection '{self.collection_name}' at {self.chroma_dir}. "

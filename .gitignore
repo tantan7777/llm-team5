@@ -2,7 +2,8 @@ chroma_db/
 raw_documents.json
 .env
 venv/
-*.db*.db-shm
+*.db
+*.db-shm
 *.db-wal
 mcp/files/
 *.db
