@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.core.config import DB_PATH, MCP_SERVER_URLS
+from app.core.config import DB_PATH, LLM_CONFIGURED, MCP_SERVER_URLS
 from app.core.agent import build_agent
 from app.db.database import init_db
 from app.api import chat, notepad as notepad_router, evaluation
@@ -43,9 +43,22 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("MCP connection failed (%s); continuing without MCP tools.", exc)
 
+    app.state.agent = None
+    app.state.startup_error = None
+
     async with AsyncSqliteSaver.from_conn_string(DB_PATH) as checkpointer:
-        agent = build_agent(extra_tools, checkpointer)
-        app.state.agent      = agent
+        if LLM_CONFIGURED:
+            try:
+                app.state.agent = build_agent(extra_tools, checkpointer)
+            except Exception as exc:
+                app.state.startup_error = str(exc)
+                logger.exception("Chat agent startup failed: %s", exc)
+        else:
+            app.state.startup_error = (
+                "LLM_BASE_URL and LLM_API_KEY are not set. Chat endpoints are disabled."
+            )
+            logger.warning(app.state.startup_error)
+
         app.state.mcp_client = mcp_client
 
         logger.info("CrossBorder Copilot ready.")
@@ -62,17 +75,41 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+    app.state.agent = None
+    app.state.startup_error = None
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.include_router(chat.router)
     app.include_router(notepad_router.router)
     app.include_router(evaluation.router)
 
+    def startup_error() -> str | None:
+        error = getattr(app.state, "startup_error", None)
+        if error:
+            return error
+        if not LLM_CONFIGURED:
+            return "LLM_BASE_URL and LLM_API_KEY are not set. Chat endpoints are disabled."
+        return None
+
     @app.get("/", tags=["Health"])
     async def root():
         return {
             "service":    "CrossBorder Copilot",
-            "status":     "running",
+            "status":     "running" if getattr(app.state, "agent", None) else "degraded",
+            "chat_ready": bool(getattr(app.state, "agent", None)),
+            "llm_configured": LLM_CONFIGURED,
+            "startup_error": startup_error(),
             "mcp_servers": MCP_SERVER_URLS or [],
+        }
+
+    @app.get("/health", tags=["Health"])
+    async def health():
+        return {
+            "service": "CrossBorder Copilot",
+            "status": "ok",
+            "chat_ready": bool(getattr(app.state, "agent", None)),
+            "llm_configured": LLM_CONFIGURED,
+            "database_path": DB_PATH,
+            "startup_error": startup_error(),
         }
 
     return app

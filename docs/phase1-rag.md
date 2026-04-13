@@ -1,8 +1,23 @@
-# Phase 1 — RAG Pipeline
+# Phase 1 RAG Pipeline
 
-This phase builds the local retrieval layer for CrossBorder Copilot. It parses DHL-related PDFs from `pdf_docs/` and saved DHL articles from `html_pages/`, chunks them with metadata, embeds the chunks, stores them in ChromaDB, and exposes a reusable retrieval API for a downstream support agent.
+This is the historical milestone document for the original retrieval layer. Use the root `README.md` for current project setup and grading.
+
+## Scope
+
+Phase 1 covered the local DHL knowledge-base pipeline:
+
+- Parse local PDFs from `pdf_docs/`
+- Parse saved DHL webpages from `html_pages/`
+- Clean and normalize extracted text
+- Chunk documents while preserving source metadata
+- Embed chunks with SentenceTransformers
+- Persist vectors in ChromaDB
+- Expose a reusable retrieval API
+- Evaluate retrieval quality on DHL support-domain questions
 
 ## Setup
+
+From the repository root:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -14,7 +29,7 @@ python -m pip install -r requirements.txt
 python parse_local.py --pdf-dir pdf_docs --html-dir html_pages --output raw_documents.json
 ```
 
-`parse_local.py` writes one record per PDF page and one record per saved HTML article. Metadata includes source type, source filename, title, inferred category, page number, total pages, raw text, and cleaned text.
+`parse_local.py` writes one record per PDF page and one record per saved HTML article. Metadata includes source type, source filename, title, inferred category, page number, raw text, and cleaned text.
 
 ## Ingest Into ChromaDB
 
@@ -65,22 +80,8 @@ result = retriever.retrieve("How do I prepare a commercial invoice?", k=5)
 ## Evaluate Retrieval
 
 ```bash
-python eval_retrieval.py --k 5
-python eval_retrieval.py --k 10 --verbose
+python eval_retrieval.py -k 5
+python eval_retrieval.py -k 10 --verbose
 ```
 
-The evaluator uses DHL support-domain queries such as prohibited items, customs documents, commercial invoice, dangerous goods, surcharges, duties and taxes, shipment protection, and returns. It prints retrieved sources, hit or miss, and overall `hit@k`.
-
-## Scope
-
-This phase intentionally covers only the RAG layer:
-
-- local PDF parsing
-- local HTML article parsing
-- text cleaning
-- chunking and metadata preservation
-- embeddings and ChromaDB storage
-- retrieval interface
-- retrieval evaluation
-
-It does not implement agent workflows, action logic, frontend UI, or ticketing logic.
+The evaluator uses DHL support-domain queries such as prohibited items, customs documents, commercial invoices, dangerous goods, surcharges, duties and taxes, shipment protection, and returns.

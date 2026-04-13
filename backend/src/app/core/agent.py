@@ -9,11 +9,16 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from app.core.config import LLM_API_KEY, LLM_BASE_URL, LLM_TEMP, MAX_TOKENS, SYSTEM_PROMPT
+from app.core.config import LLM_API_KEY, LLM_BASE_URL, LLM_CONFIGURED, LLM_TEMP, MAX_TOKENS, SYSTEM_PROMPT
+from app.tools.knowledge_base import knowledge_base
 from app.tools.notepad import notepad
 
 
 def _build_llm(tools: list) -> ChatOpenAI:
+    if not LLM_CONFIGURED:
+        raise RuntimeError(
+            "LLM_BASE_URL and LLM_API_KEY must be set before the chat agent can be started."
+        )
     llm = ChatOpenAI(
         base_url=LLM_BASE_URL,
         api_key=LLM_API_KEY,
@@ -30,14 +35,14 @@ def _trim(messages: list[BaseMessage]) -> list[BaseMessage]:
         max_tokens=MAX_TOKENS,
         token_counter=len,   # lightweight; swap for tiktoken if desired
         strategy="last",
-        include_system=False,
+        include_system=True,
         allow_partial=False,
     )
 
 
 def build_agent(extra_tools: list, checkpointer):
     """Compile and return a LangGraph StateGraph agent."""
-    all_tools      = [notepad] + extra_tools
+    all_tools      = [knowledge_base, notepad] + extra_tools
     llm_with_tools = _build_llm(all_tools)
 
     def agent_node(state: MessagesState):

@@ -86,7 +86,15 @@ async def chat_invoke(req: ChatRequest, request: Request):
     """
     agent = getattr(request.app.state, "agent", None)
     if agent is None:
-        raise HTTPException(status_code=503, detail="Agent not initialised.")
+        detail = getattr(
+            request.app.state,
+            "startup_error",
+            "Chat agent is not initialised.",
+        ) or "Chat agent is not initialised. Set LLM_BASE_URL and LLM_API_KEY, then restart the backend."
+        raise HTTPException(status_code=503, detail=detail)
+
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be empty.")
 
     session_id = _resolve_session_id(req.session_id)
     config     = {"configurable": {"thread_id": session_id}}
@@ -132,7 +140,12 @@ async def chat_history(session_id: str, request: Request):
     """
     agent = getattr(request.app.state, "agent", None)
     if agent is None:
-        raise HTTPException(status_code=503, detail="Agent not initialised.")
+        detail = getattr(
+            request.app.state,
+            "startup_error",
+            "Chat agent is not initialised.",
+        ) or "Chat agent is not initialised. Set LLM_BASE_URL and LLM_API_KEY, then restart the backend."
+        raise HTTPException(status_code=503, detail=detail)
 
     config = {"configurable": {"thread_id": session_id}}
     try:

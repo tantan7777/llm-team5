@@ -246,6 +246,7 @@
   }
 
   .status-dot.connected { background: #3DD68C; }
+  .status-dot.warning { background: #FFB020; }
   .status-dot.error { background: var(--dhl-red); }
 
   /* ── Main area ───────────────────────────────────────────────── */
@@ -948,11 +949,18 @@
     dot.className = 'status-dot';
     txt.textContent = 'Checking…';
     try {
-      const r = await fetch(getApiUrl() + '/', { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(getApiUrl() + '/health', { signal: AbortSignal.timeout(4000) });
       if (r.ok) {
-        dot.className = 'status-dot connected';
-        txt.textContent = 'Connected';
-        showToast('Connected to API', 'success');
+        const data = await r.json().catch(() => ({}));
+        if (data.chat_ready) {
+          dot.className = 'status-dot connected';
+          txt.textContent = 'Connected';
+          showToast('Connected to API', 'success');
+        } else {
+          dot.className = 'status-dot warning';
+          txt.textContent = 'Backend online, chat disabled';
+          showToast(data.startup_error || 'Backend is online, but chat is not ready.', 'error');
+        }
       } else {
         throw new Error('Non-OK');
       }
@@ -1117,7 +1125,7 @@
       removeTyping();
 
       if (!r.ok) {
-        const err = await r.text();
+        const err = await readApiError(r);
         showToast('Error: ' + err, 'error');
         return;
       }
@@ -1229,6 +1237,15 @@
     t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 4000);
+  }
+
+  async function readApiError(response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await response.json().catch(() => null);
+      if (data && data.detail) return String(data.detail);
+    }
+    return await response.text();
   }
 
   loadConfig();

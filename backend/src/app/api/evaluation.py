@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import sys
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 ROOT_DIR = Path(__file__).resolve().parents[4]
 if str(ROOT_DIR) not in sys.path:
@@ -19,7 +19,9 @@ async def run_eval():
 
     try:
         os.chdir(ROOT_DIR)
-        results = run_evaluation(verbose=False)
+        results = run_evaluation(verbose=False, quiet=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {exc}") from exc
     finally:
         os.chdir(old_cwd)
 

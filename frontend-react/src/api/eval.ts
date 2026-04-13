@@ -1,11 +1,7 @@
-export async function runEvaluation() {
-  const res = await fetch("http://localhost:8000/evaluation/run", {
+import { apiFetch } from "./config";
+
+export async function runEvaluation(apiBase: string) {
+  return apiFetch(apiBase, "/evaluation/run", {
     method: "POST",
   });
-
-  if (!res.ok) {
-    throw new Error("Evaluation failed");
-  }
-
-  return res.json();
 }

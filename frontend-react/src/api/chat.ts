@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8000";
+import { apiFetch } from "./config";
 
 export type ChatResponse = {
   session_id: string;
@@ -16,8 +16,12 @@ export type HistoryResponse = {
   messages: HistoryMessage[];
 };
 
-export async function sendMessage(query: string, session_id?: string): Promise<ChatResponse> {
-  const res = await fetch(`${API_BASE}/chat/invoke`, {
+export async function sendMessage(
+  apiBase: string,
+  query: string,
+  session_id?: string,
+): Promise<ChatResponse> {
+  return apiFetch<ChatResponse>(apiBase, "/chat/invoke", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -27,20 +31,14 @@ export async function sendMessage(query: string, session_id?: string): Promise<C
       session_id: session_id ?? "",
     }),
   });
-
-  if (!res.ok) {
-    throw new Error("Request failed");
-  }
-
-  return res.json();
 }
 
-export async function getHistory(session_id: string): Promise<HistoryResponse> {
-  const res = await fetch(`${API_BASE}/chat/history/${session_id}`);
-
-  if (!res.ok) {
-    throw new Error("History request failed");
-  }
-
-  return res.json();
+export async function getHistory(
+  apiBase: string,
+  session_id: string,
+): Promise<HistoryResponse> {
+  return apiFetch<HistoryResponse>(
+    apiBase,
+    `/chat/history/${encodeURIComponent(session_id)}`,
+  );
 }

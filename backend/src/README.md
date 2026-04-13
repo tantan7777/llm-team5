@@ -1,90 +1,111 @@
-# CrossBorder Copilot
+# Backend
 
-LangGraph-powered cross-border shipping assistant with MCP support and SQLite memory.
+FastAPI backend for CrossBorder Copilot. The root `README.md` is the main project entry point; this file only documents backend-specific behavior.
 
-## Project Structure
+## Run
 
-```
-crossborder_copilot/
-├── main.py                  # Entry point
-├── requirements.txt
-├── README.md
-└── app/
-    ├── factory.py           # FastAPI app factory + lifespan
-    ├── core/
-    │   ├── config.py        # All constants & env-var config
-    │   └── agent.py         # LangGraph agent builder
-    ├── db/
-    │   └── database.py      # SQLModel schema + engine
-    ├── tools/
-    │   └── notepad.py       # Notepad LangChain tool
-    └── api/
-        ├── chat.py          # /chat/invoke  and  /chat/history routes
-        └── notepad.py       # /notepad route
-```
-
-## Setup
+From the repository root:
 
 ```bash
-pip install -r requirements.txt
-python main.py
-# or
+python -m pip install -r requirements.txt
+python backend/src/main.py
+```
+
+Alternative from this directory:
+
+```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## Environment Variables
+## Environment
 
-| Variable          | Default                                        | Description                          |
-|-------------------|------------------------------------------------|--------------------------------------|
-| `LLM_BASE_URL`    | `https://rsm-8430-finalproject.bjlkeng.io/v1`  | OpenAI-compatible LLM endpoint       |
-| `LLM_API_KEY`     | `1012837405`                                   | API key for the LLM                  |
-| `LLM_TEMP`        | `0.1`                                          | LLM temperature                      |
-| `MAX_TOKENS`      | `4000`                                         | Max tokens per LLM response          |
-| `DB_PATH`         | `crossborder.db`                               | SQLite database file path            |
-| `MCP_SERVER_URLS` | *(empty)*                                      | Comma-separated MCP SSE server URLs  |
+| Variable          | Default          | Description                         |
+|-------------------|------------------|-------------------------------------|
+| `LLM_BASE_URL`    | required for chat | OpenAI-compatible LLM endpoint      |
+| `LLM_API_KEY`     | required for chat | API key for the LLM                 |
+| `LLM_TEMP`        | `0.1`            | LLM temperature                     |
+| `MAX_TOKENS`      | `10000`          | Max tokens per LLM response         |
+| `DB_PATH`         | `crossborder.db` | SQLite database file path           |
+| `MCP_SERVER_URLS` | empty            | Comma-separated MCP SSE server URLs |
 
-## API Usage
+If LLM credentials are missing, the app starts in degraded mode. `/health` returns `chat_ready: false`, and `/chat/invoke` returns a 503 with setup details.
 
-### Start a new conversation (auto session ID)
+## Routes
+
+```http
+GET /health
+GET /
+POST /chat/invoke
+GET /chat/history/{session_id}
+GET /notepad/{session_id}
+POST /evaluation/run
+```
+
+Swagger UI:
+
+```text
+http://localhost:8000/docs
+```
+
+## Chat Contract
+
+Start a new session:
 
 ```http
 POST /chat/invoke
 Content-Type: application/json
 
-{ "query": "What HS code covers laptop computers?" }
+{
+  "query": "What documents are needed for customs clearance?",
+  "session_id": ""
+}
 ```
 
-Response includes a generated `session_id` — **save this** for follow-up messages.
-
-### Continue an existing conversation
+Continue a session:
 
 ```http
 POST /chat/invoke
 Content-Type: application/json
 
-{ "query": "What is the import duty rate into Canada?", "session_id": "<your-session-id>" }
+{
+  "query": "What about lithium batteries?",
+  "session_id": "<existing-session-id>"
+}
 ```
 
-### View conversation history
+The first stored history message is a system message:
 
-```http
-GET /chat/history/<session_id>
+```text
+SESSION_ID: <session-id>
 ```
 
-The **first message** in the history is always a system message in the form:
+The agent uses this value when calling the notepad tool.
 
+## Backend Components
+
+```text
+main.py                 # App entry point
+app/factory.py          # FastAPI factory, lifespan, health routes
+app/core/config.py      # Environment config and system prompt
+app/core/agent.py       # LangGraph agent and tool routing
+app/api/chat.py         # Chat and history routes
+app/api/notepad.py      # Notepad inspection route
+app/api/evaluation.py   # Retrieval evaluation route
+app/db/database.py      # SQLModel schema and SQLite engine
+app/tools/notepad.py    # Session-scoped notepad tool
+app/tools/knowledge_base.py # Local DHL retrieval tool
 ```
-SESSION_ID: <your-session-id>
+
+## Checks
+
+From the repository root:
+
+```bash
+python -m compileall backend/src
 ```
 
-Copy the value directly from there — no need to ask the bot for its session ID.
+Smoke-test health behavior without LLM credentials:
 
-### View notepad
-
-```http
-GET /notepad/<session_id>
+```bash
+DB_PATH=/tmp/cbc-smoke.db python -c "import sys; sys.path.insert(0, 'backend/src'); from fastapi.testclient import TestClient; from app.factory import create_app; client=TestClient(create_app()); print(client.get('/health').json())"
 ```
-
-### Swagger UI
-
-Visit `http://localhost:8000/docs` for the full interactive API documentation.

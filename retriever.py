@@ -59,8 +59,15 @@ class Retriever:
 
     def _load_collection(self) -> Collection:
         client = chromadb.PersistentClient(path=self.chroma_dir)
+        embedding_function = make_embedding_function(
+            self.embedding_model,
+            local_files_only=self.local_files_only,
+        )
         try:
-            return client.get_collection(name=COLLECTION_NAME)
+            return client.get_collection(
+                name=self.collection_name,
+                embedding_function=embedding_function,
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"Could not open Chroma collection '{self.collection_name}' at {self.chroma_dir}. "
