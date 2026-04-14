@@ -86,6 +86,14 @@ frontend/index.html
 
 It still requires the FastAPI backend. Use the connection button before sending a message.
 
+### 6. Starting MCP's
+
+Navigate to the `/mcp` and run  
+  `python order.py`
+  `python support.py`
+  `python checklist.py`
+Check the std.out of the terminal to assure servers are running.
+
 ## Main Features
 
 - Chat endpoint with generated or reusable `session_id`
